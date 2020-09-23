@@ -1,0 +1,374 @@
+---
+title: "15.433 Assignment 2 Ce Luo"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+
+Exercise 1
+Part (A)
+Read the data and check
+```{r}
+# set the working directory for RStudio
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+# Read the value weighted return data copied from File2 and the market premium & the risk free rate from file1
+Ex1A_VW <- read.csv("Ex1PartA_VW.csv", skip = 2, header = TRUE)
+# str(Ex1A_VW)
+# head(Ex1A_VW)
+# tail(Ex1A_VW)
+
+
+```
+
+Calculate t-stats of mean excess returns for size portfolios
+```{r}
+# For Newey-West errors
+require(sandwich)
+
+linearFits_A <- vector(mode="list", length=10)
+
+meanExRet_A <- vector(length=10)
+# Assign element names
+for (i in 1:10){
+  if (i <= 5) names(meanExRet_A)[i] <- paste("low ", i) 
+  else names(meanExRet_A)[i] <- paste("high ", i)
+}
+
+NWadjSd_A <- vector(length=10)
+NWadjTstat_A <- vector(length=10)
+
+for (i in 1:10){
+  linearFits_A[[i]] <- lm( (Ex1A_VW[[10+i]]-RF) ~ 1, data =  Ex1A_VW) # Deciles start with 11th column
+  meanExRet_A[i] <- linearFits_A[[i]]$coefficients
+  NWadjSd_A[i] <- sqrt(NeweyWest(linearFits_A[[i]], lag = 6))
+}
+
+NWadjTstat_A <- meanExRet_A/NWadjSd_A
+
+rbind(meanExRet_A, NWadjTstat_A)
+
+# High Low difference:
+# Regress the difference over a constant
+lowHighDiff_A <- lm( (Ex1A_VW$Lo.10-Ex1A_VW$Hi.10) ~ 1, data =  Ex1A_VW)
+
+writeLines("")
+print( paste("Adjusted t-stat for the difference between largest decile portfolio and the smallest decile portfolio: ",lowHighDiff_A$coefficients/sqrt(NeweyWest(lowHighDiff_A, lag = 6))) )
+
+```
+
+Part (B) Similar; skip
+
+Part (C)
+Calculate the portfolio alphas with respect to the CAPM for each of the ten size decile portfolios using monthly returns for the entire sample period.
+```{r}
+# Use the same data file as in part (A)
+
+linearFits_C <- vector(mode="list", length=10)
+
+alpha_C <- vector(length=10)
+# Assign element names
+for (i in 1:10){
+  if (i <= 5) names(alpha_C)[i] <- paste("low ", i) 
+  else names(alpha_C)[i] <- paste("high ", i)
+}
+
+NWadjSd_C <- vector(length=10)
+NWadjTstat_C <- vector(length=10)
+
+for (i in 1:10){
+  linearFits_C[[i]] <- lm( (Ex1A_VW[[10+i]]-RF) ~ Mkt.RF, data =  Ex1A_VW) # Deciles start with 11th column
+  alpha_C[i] <- linearFits_C[[i]]$coefficients[1]
+  NWadjSd_C[i] <- sqrt(NeweyWest(linearFits_C[[i]], lag = 6)[1,1])
+}
+
+NWadjTstat_C <- alpha_C/NWadjSd_C
+
+print("CAPM alpha estimate and the adjusted t-stats: ")
+rbind(alpha_C,NWadjTstat_C)
+
+# High Low alpha difference:
+# Regress the difference over the mkt premium
+lowHighDiff_C <- lm( (Ex1A_VW$Lo.10-Ex1A_VW$Hi.10) ~ Mkt.RF, data =  Ex1A_VW)
+
+writeLines("")
+print( paste("Adjusted t-stat for the CAPM alpha difference between largest decile portfolio and the smallest decile portfolio: ",lowHighDiff_C$coefficients[1]/sqrt(NeweyWest(lowHighDiff_C, lag = 6)[1,1])) )
+
+
+```
+
+Exercise 2
+Part (A)
+Read the data and check
+```{r}
+# Read the value weighted return data copied from File4 and the market premium & the risk free rate from file1
+Ex2AB_VW <- read.csv("Ex2PartAB_VW.csv", skip = 2, header = TRUE)
+row.names(Ex2AB_VW) <- Ex2AB_VW$Date
+Ex2AB_VW$Date <- NULL
+str(Ex2AB_VW)
+head(Ex2AB_VW)
+tail(Ex2AB_VW)
+
+```
+
+Calculate t-stats of mean excess returns and the CAPM alpha for two bivariate sorted portfolios
+```{r}
+# Regress over a constant for excess return
+smallHBM <- lm( (Ex2AB_VW$SMALL.HiBM - Ex2AB_VW$RF) ~ 1 )
+print("Mean excess return and adjusted t-stat for smallest size/highest book-to-market: ")
+print(paste(smallHBM$coefficients, smallHBM$coefficients/sqrt(NeweyWest(smallHBM, lag = 6)))) 
+
+writeLines("")
+
+largeLBMexRet <- lm( (Ex2AB_VW$BIG.LoBM - Ex2AB_VW$RF) ~ 1 )
+print("Mean excess return and adjusted t-stat for largest size/lowest book-to-market: ")
+print(paste(largeLBMexRet$coefficients, largeLBMexRet$coefficients/sqrt(NeweyWest(largeLBMexRet, lag = 6)))) 
+
+writeLines("")
+
+# For mean difference
+meanDiff_2A <- lm( (Ex2AB_VW$SMALL.HiBM - Ex2AB_VW$BIG.LoBM) ~ 1 )
+print("Adjusted t-stat for mean difference: ")
+print(paste(meanDiff_2A$coefficients, meanDiff_2A$coefficients/sqrt(NeweyWest(meanDiff_2A, lag = 6)))) 
+
+writeLines("")
+
+# For CAPM alpha
+alphaDiff_2A <- lm( (Ex2AB_VW$SMALL.HiBM - Ex2AB_VW$BIG.LoBM) ~  Ex2AB_VW$Mkt.RF )
+print("Adjusted t-stat for CAPM alpha difference: ")
+print(paste(alphaDiff_2A$coefficients[1], alphaDiff_2A$coefficients[1] / sqrt(NeweyWest(alphaDiff_2A, lag = 6)[1,1]))) 
+
+```
+
+Part (B)
+```{r}
+# Assign the SIZE and BM score based on the sequence of variables
+# str(Ex2AB_VW)
+sizeScore <- rep(1:5, each=5)
+BMScore <- rep(1:5, times = 5)
+
+# Define cross-section regression for each row
+crossSecReg_2B <- function(x){
+  # last two columns are mkr.rf and rf; ignore;
+  regCoeff <- lm( (x[1:(length(x)-2)] - x['RF']) ~ sizeScore + BMScore)$coefficients
+  return(regCoeff)
+}
+
+FamaMacRegCoeff_2B <- apply(Ex2AB_VW, MARGIN = 1, FUN = crossSecReg_2B)
+# rows and columns are flipped
+FamaMacRegCoeff_2B <- as.data.frame(t(FamaMacRegCoeff_2B))
+
+print("Fama-MacBeth coefficients means:")
+apply(FamaMacRegCoeff_2B, MARGIN = 2, FUN = mean)
+writeLines("")
+
+NWadj_2B <- function(x){
+  # regress over a constant for checking the mean
+  reg <- lm(x ~ 1)
+  NWsd <- sqrt(NeweyWest(reg, lag = 6))
+  NWtStat <- reg$coefficients/NWsd
+}
+
+print("Fama-MacBeth coefficients adjusted t-stats:")
+apply(FamaMacRegCoeff_2B, MARGIN = 2, FUN = NWadj_2B)
+
+```
+SizeScore has negative coefficient but not really significant here; consistent with Problem 1 in terms of general direction; BMScore positive and significant; should be consistent.
+
+Part (C)
+Read the data and check
+```{r}
+# Read the value weighted return data copied from File4 and the market premium & the risk free rate from file1
+Ex2C_VW <- read.csv("Ex2PartC_VW.csv", skip = 2, header = TRUE)
+row.names(Ex2C_VW) <- Ex2C_VW$Date
+Ex2C_VW$Date <- NULL
+str(Ex2C_VW)
+head(Ex2C_VW)
+tail(Ex2C_VW)
+
+```
+
+
+```{r}
+# Assign the Beta score based on the sequence of variables
+# str(Ex2AB_VW)
+betaScore <- 1:10
+
+# Define cross-section regression for each row
+crossSecReg_2C <- function(x){
+  # first 5 columns are Qnt; last two columns are mkr.rf and rf; ignore; - RF, the last column
+  regCoeff <- lm( (x[6:(length(x)-2)] - x['RF']) ~ betaScore)$coefficients
+  return(regCoeff)
+}
+
+FamaMacRegCoeff_2C <- apply(Ex2C_VW, MARGIN = 1, FUN = crossSecReg_2C)
+# rows and columns are flipped
+FamaMacRegCoeff_2C <- as.data.frame(t(FamaMacRegCoeff_2C))
+
+print("Fama-MacBeth coefficients means:")
+apply(FamaMacRegCoeff_2C, MARGIN = 2, FUN = mean)
+writeLines("")
+
+NWadj_2C <- function(x){
+  # regress over a constant for checking the mean
+  reg <- lm(x ~ 1)
+  NWsd <- sqrt(NeweyWest(reg, lag = 6))
+  NWtStat <- reg$coefficients/NWsd
+}
+
+print("Fama-MacBeth coefficients adjusted t-stats:")
+apply(FamaMacRegCoeff_2C, MARGIN = 2, FUN = NWadj_2C)
+
+
+```
+significant alpha and insignificant betaScore; bad news for CAPM.
+
+
+Exercise 3
+Read the data and check
+```{r}
+# Read the value weighted return data copied from File4 and the market premium & the risk free rate from file1
+Ex3_VW <- read.csv("Ex3_VW.csv", skip = 2, header = TRUE)
+row.names(Ex3_VW) <- Ex3_VW$Date
+Ex3_VW$Date <- NULL
+str(Ex3_VW)
+head(Ex3_VW)
+tail(Ex3_VW)
+
+```
+
+Part (A) (Similar; skip; nope)
+```{r}
+# Regress over a constant for excess return
+lowProfit <- lm( (Ex3_VW$Lo.10 - Ex3_VW$RF) ~ Ex3_VW$Mkt.RF )
+print("CAPM alpha and adjusted t-stat for smallest size/highest book-to-market: ")
+print(paste(lowProfit$coefficients[1], lowProfit$coefficients[1]/sqrt(NeweyWest(lowProfit, lag = 6)[1,1]))) 
+
+writeLines("")
+
+highProfit <- lm( (Ex3_VW$Hi.10 - Ex3_VW$RF) ~ Ex3_VW$Mkt.RF )
+print("CAPM alpha and adjusted t-stat for largest size/lowest book-to-market: ")
+print(paste(highProfit$coefficients[1], highProfit$coefficients[1]/sqrt(NeweyWest(highProfit, lag = 6)[1,1]))) 
+
+writeLines("")
+
+# For mean difference
+# meanDiff_3A <- lm( (Ex3_VW$Hi.10 - Ex3_VW$Lo.10) ~ 1 )
+# print("Adjusted t-stat for mean difference: ")
+# print(paste(meanDiff_3A$coefficients, meanDiff_3A$coefficients/sqrt(NeweyWest(meanDiff_3A, lag = 6)))) 
+# 
+# writeLines("")
+
+# For CAPM alpha
+alphaDiff_3A <- lm( (Ex3_VW$Hi.10 - Ex3_VW$Lo.10) ~  Ex3_VW$Mkt.RF )
+print("Adjusted t-stat for CAPM alpha difference: ")
+print(paste(alphaDiff_3A$coefficients[1], alphaDiff_3A$coefficients[1] / sqrt(NeweyWest(alphaDiff_3A, lag = 6)[1,1]))) 
+
+```
+
+
+Part (B)
+```{r}
+# Regress over FF3 factors for alpha
+lowDecProfit <- lm( (Lo.10 - RF) ~ Mkt.RF + SMB + HML, data = Ex3_VW)
+print("CAPM alpha and adjusted t-stat for the lowest decile of operating profitability: ")
+coeffs <- lowDecProfit$coefficients
+adjTStats <- coeffs / sqrt(diag(NeweyWest(lowDecProfit, lag = 6)))
+rbind(coeffs, adjTStats)
+
+writeLines("")
+
+highDecProfit <- lm( (Hi.10 - RF) ~ Mkt.RF + SMB + HML, data = Ex3_VW)
+print("CAPM alpha and adjusted t-stat for the highest decile of operating profitability: ")
+coeffs <- highDecProfit$coefficients
+adjTStats <- coeffs / sqrt(diag(NeweyWest(highDecProfit, lag = 6)))
+rbind(coeffs, adjTStats)
+
+writeLines("")
+
+# For CAPM alpha difference
+alphaDiff_3B <- lm( (Hi.10 - Lo.10) ~  Mkt.RF + SMB + HML, data = Ex3_VW)
+print("Adjusted t-stat for CAPM alpha difference: ")
+print(paste(alphaDiff_3B$coefficients[1], alphaDiff_3B$coefficients[1] / sqrt(NeweyWest(alphaDiff_3B, lag = 6)[1,1]))) 
+```
+The difference in CAPM alpha is significant.
+
+
+Exercise 4
+Read the data and check
+```{r}
+# Data merged from file 1
+require(xlsx)
+raw100Stocks <- read.xlsx('100stocksWithFF3.xlsx', sheetIndex = 1, startRow = 5, header = TRUE)
+# str(raw100Stocks)
+# head(raw100Stocks)
+
+# head(paste0("0",raw100Stocks$month))
+add0toSomeMonths <- function(x) {
+  if (x < 10) x <- paste0("0",x)
+  else x <- paste0(x)
+}
+
+raw100Stocks$month <- sapply(raw100Stocks$month, add0toSomeMonths)
+  
+raw100Stocks$date <- as.numeric(paste0(raw100Stocks$year, raw100Stocks$month))
+
+str(raw100Stocks)
+head(raw100Stocks)
+
+FF3_4 <- read.xlsx('100stocksWithFF3.xlsx', sheetIndex = 2, startRow = 1, header = TRUE)
+str(FF3_4)
+head(FF3_4)
+```
+
+Part (A)
+```{r}
+# Split into data frames based on the period
+timeSplit_4 <- split(raw100Stocks, raw100Stocks$date)
+
+equalWeightRet_4 <- function(x){
+  EWRet <- sum(x['ret'])/dim(x['ret'])[1]
+  return(EWRet)
+}
+
+EW100Ret <- lapply(timeSplit_4, equalWeightRet_4 )
+
+EW_CAPM <- lm( (as.numeric(EW100Ret) - FF3_4$RF) ~ FF3_4$Mkt.RF)
+
+require(lmtest)
+print("For equally-weightedportfolio (CAPM): ")
+coeftest(EW_CAPM,vcov=NeweyWest(EW_CAPM, lag = 6))
+
+valueWeightRet_4 <- function(x){
+  mktCapWeights <- x['lmktcap']  / sum(x['lmktcap'])
+  VWRet <- sum(x['ret'] *  mktCapWeights)
+  return(VWRet)
+}
+
+VW100Ret <- lapply(timeSplit_4, valueWeightRet_4 )
+
+VW_CAPM <- lm( (as.numeric(VW100Ret) - FF3_4$RF) ~ FF3_4$Mkt.RF)
+
+print("For value-weighted portfolio (CAPM): ")
+coeftest(VW_CAPM,vcov=NeweyWest(VW_CAPM, lag = 6))
+
+```
+
+Part (B)
+```{r}
+print("For value-weighted portfolio (FF3): ")
+VW_FF3 <- lm( (as.numeric(VW100Ret) - FF3_4$RF) ~ FF3_4$Mkt.RF + FF3_4$SMB + FF3_4$HML)
+
+coeftest(VW_FF3,vcov=NeweyWest(VW_FF3, lag = 6))
+
+```
+These are likely to be the big stocks.
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
