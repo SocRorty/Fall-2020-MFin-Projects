@@ -1,0 +1,168 @@
+---
+title: "15.433"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+
+Exercise 3
+Read the assignment data and check
+```{r}
+# set the working directory for RStudio
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+# Read the return data
+# one.line <- readLines("returns_daily.txt", n = 6)[6] # char string with 1st line of data
+rDaily <- read.table("returns_daily.txt", skip = 5, header = TRUE)
+str(rDaily)
+head(rDaily)
+
+rMonthly <- read.table("returns_monthly.txt", skip = 4, header = TRUE)
+head(rMonthly)
+
+rAnnual <- read.table("returns_annual.txt", skip = 5, header = TRUE)
+head(rAnnual)
+```
+
+
+```{r}
+require(moments)
+# Part A
+for (i in list(rDaily, rMonthly, rAnnual)){
+  x1 <- sprintf("Stock return mean, var, and sd: %f, %f, %f", mean(i[,2]), var(i[,2]), sd(i[,2]))
+  print(x1)
+  x2 <- sprintf("Bond return mean, var, and sd: %f, %f, %f", mean(i[,3]), var(i[,3]), sd(i[,3]))
+  print(x2)
+  x3 <- sprintf("Covariance and correlation: %f, %f", cov(i[,2], i[3]), cor(i[,2], i[3]))
+  print(x3)
+  writeLines("")
+}
+
+# Part B
+for (i in list(rDaily, rMonthly, rAnnual)){
+  x1 <- sprintf("Stock return skewness and kurtosis: %f, %f", skewness(i[,2]), kurtosis(i[,2]))
+  print(x1)
+  x2 <- sprintf("Bond return skewness and kurtosis: %f, %f", skewness(i[,3]), kurtosis(i[,3]))
+  print(x2)
+  writeLines("")
+}
+
+# Theoretical value skewness 0 and kurtosis 3*sigma^4
+qplot(rDaily[,2], bins = 60) + labs(x = "Return",y='Frequencies', title='Daily Stock Returns Histogram')
+qplot(rDaily[,3], bins = 60) + labs(x = "Return",y='Frequencies', title='Daily Bond Returns Histogram')
+
+# Part C
+# for (i in list(rDaily, rMonthly, rAnnual)){
+#   x1 <- sprintf("95% confidence interval for the next period stock return: [%f, %f]", mean(i[,2]) - 1.96*sd(i[,2]),  mean(i[,2]) + 1.96*sd(i[,2]))
+#   print(x1)
+#   x2 <- sprintf("95% confidence interval for the next period bond return: [%g, %g]", mean(i[,3]) - 1.96*sd(i[,3]),  mean(i[,3]) + 1.96*sd(i[,3]))
+#   print(x2)
+#   x3 <- sprintf("95% confidence interval for the next 30 periods average stock return: [%g, %g]", mean(i[,2]) - 1.96*sqrt(1/30)*sd(i[,2]),  mean(i[,2]) + 1.96*sd(i[,2]))
+#   print(x3)
+#   x4 <- sprintf("95% confidence interval for the next 30 periods average bond return: [%g, %g]", mean(i[,3]) - 1.96*sqrt(1/30)*sd(i[,3]),  mean(i[,3]) + 1.96*sd(i[,3]))
+#   print(x4)
+# }
+
+for (i in list(rDaily, rMonthly, rAnnual)){
+  x1 <- paste("95% confidence interval for the next period stock return: [", mean(i[,2]) - 1.96*sd(i[,2]), ", ", mean(i[,2]) + 1.96*sd(i[,2]), "]")
+  print(x1)
+  x2 <- paste("95% confidence interval for the next period bond return: [", mean(i[,3]) - 1.96*sd(i[,3]), ", ", mean(i[,3]) + 1.96*sd(i[,3]), "]")
+  print(x2)
+  x3 <- paste("95% confidence interval for the next 30 periods average stock return: [", mean(i[,2]) - 1.96*sqrt(1/30)*sd(i[,2]), ", ", mean(i[,2]) + 1.96*sqrt(1/30)*sd(i[,2]), "]")
+  print(x3)
+  x4 <- paste("95% confidence interval for the next 30 periods average bond return: [", mean(i[,3]) - 1.96*sqrt(1/30)*sd(i[,3]), ", ", mean(i[,3]) + 1.96*sqrt(1/30)*sd(i[,3]), "]")
+  print(x4)
+  writeLines("")
+}
+
+# Part E
+thresholdK <- c(-0.2, -0.1, 0, 0.1, 0.2)
+for (i in list(rDaily, rMonthly, rAnnual)) {
+  x1 <- print("For stock: ")
+  probStock <- pnorm(thresholdK, mean = mean(i[,2]), sd = sd(i[,2]))
+  print(probStock)
+  print(plotStock <- qplot(thresholdK, probStock))
+  plotStock + labs(x = "K",y='Probability', title='Stock')
+  x2 <- print("For bond: ")
+  probBond <- pnorm(thresholdK, mean = mean(i[,3]), sd = sd(i[,3]))
+  print(probBond)
+  plotStock <- qplot(thresholdK, probBond)
+  print(plotStock + labs(x = "K",y='Probability', title='Bond'))
+  writeLines("")
+}
+
+# Part F
+# iid and cov = 0?
+for (i in list(rDaily, rMonthly, rAnnual)) {
+  print(pnorm(0, mean = mean(i[,2]) - mean(i[,3]), sd = sqrt(var(i[,2])+var(i[,3])) ))
+}
+```
+
+Exercise 4
+```{r}
+# Part A omitted for now, should be close to previous Part E
+# Part B
+print("Part B")
+thresholdK <- c(-0.2, -0.1, 0, 0.1, 0.2)
+for (i in list(rDaily, rMonthly, rAnnual)) {
+  sampleSize<- 10000
+  x1 <- print("For stock: ")
+  compareFunc <- function(k){
+    length(which((sample(i[,2],sampleSize,replace = TRUE) < k)))
+  }
+  print(apply(data.frame(thresholdK), MARGIN = 1, FUN = compareFunc)/sampleSize)
+  x2 <- print("For bond: ")
+  compareFunc <- function(k){
+    length(which((sample(i[,3],sampleSize,replace = TRUE) < k)))
+  }
+  print(apply(data.frame(thresholdK), MARGIN = 1, FUN = compareFunc)/sampleSize)
+  writeLines("")
+}
+
+# Part C
+print("Part C")
+for (i in list(rDaily, rMonthly, rAnnual)) {
+  # print(1-pnorm(0.2, mean = 5*mean(i[,2]) - 5*mean(i[,3]), sd = sqrt(5)*sqrt(var(i[,2])+var(i[,3])) ))
+  # or log(1.2)?
+  print("For stock:")
+  print(1-pnorm(log(1.2), mean = 5*mean(i[,2]), sd = sqrt(5)*sqrt(var(i[,2])+var(i[,3])) ))
+  print("For bond:")
+  print(1-pnorm(log(1.2), mean = 5*mean(i[,3]), sd = sqrt(5)*sqrt(var(i[,2])+var(i[,3])) ))
+  writeLines("")
+}
+
+# Part D omit for now, should be close to C
+
+# Part E
+print("Part E")
+for (i in list(rDaily, rMonthly, rAnnual)) {
+  sampleSize <- 10000
+  stockSample <- sample(i[,2], 5*sampleSize, replace = TRUE)
+  bondSample <- sample(i[,3], 5*sampleSize, replace = TRUE)
+  count <- length(which( colSums(matrix(stockSample, nrow=5)) > colSums(matrix(bondSample, nrow=5)) + 0.2 ))
+  print(count/sampleSize)
+  writeLines("")
+}
+
+
+# Part F
+print("Part F")
+for (i in list(rDaily, rMonthly, rAnnual)) {
+  print("Probability of stock underperforms in the next 30 periods:")
+  print(pnorm(0, mean = 30*mean(i[,2]) - 30*mean(i[,3]), sd = sqrt(30)*sqrt(var(i[,2])+var(i[,3])) ))
+  writeLines("")
+}
+# should be the same for average, check
+# for (i in list(rDaily, rMonthly, rAnnual)) {
+#   print("Probability of stock underperforms in the next 30 periods:")
+#   print(pnorm(0, mean = mean(i[,2]) - mean(i[,3]), sd = sqrt(1/30)*sqrt(var(i[,2])+var(i[,3])) ))
+# }
+
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
