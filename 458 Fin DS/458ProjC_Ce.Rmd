@@ -1,0 +1,245 @@
+---
+title: "15.458 Project B Ce Luo"
+output: html_notebook
+---
+
+Problem #1
+Set the working directory and read the queried data
+```{r}
+# set the working directory for RStudio
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+# read the data
+ProjC_1_Data <- read.csv("projC_query0.txt", header=T)
+
+# str(ProjC_1_Data)
+# head(ProjC_1_Data)
+
+ProjC_1_Data$Date <- as.Date(ProjC_1_Data$Date, "%Y-%m-%d")
+head(ProjC_1_Data)
+```
+
+1.a
+A time series plot of the 3-month rolling beta of the stock vs. the S&P 500.
+```{r}
+require(ggplot2)
+
+plot1aCoeff <- 0.1
+ggplot(data = ProjC_1_Data, aes(Date)) + geom_line(aes(y = Beta, colour = "3-month Beta")) +geom_line(aes(y = SPTR/plot1aCoeff, colour = "SPTR")) +
+scale_y_continuous(name = "For Beta", sec.axis = sec_axis(~.*plot1aCoeff, name="For SPTR"))+ labs(title="For Walmart",x="Date")
+
+
+```
+
+1.b
+A scatter plot of 1-day stock returns vs. the SPTR (S&P 500 total return index) 1-day returns along with a line of best fit
+```{r}
+require(ggpmisc)
+ggplot(data = ProjC_1_Data, aes(x = SPTR, y = Return)) + geom_point() + geom_smooth(method = "lm", formula = y ~ x) + labs(title="For Walmart")+ stat_poly_eq(formula = y ~ x, aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), parse = TRUE)
+```
+
+1.c
+A scatter plot of 1-day stock returns vs. the VIX (CBOE implied volatility index) 1-day returns along with regression line and its slope equation.
+```{r}
+ggplot(data = ProjC_1_Data, aes(x = VIX, y = Return)) + geom_point() + geom_smooth(method = "lm", formula = y ~ x) + labs(title="For Walmart") + stat_poly_eq(formula = y ~ x, aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), parse = TRUE)
+```
+
+Should VIX be an additional factor other than the mkt?
+```{r}
+vixOnMkt_1 <- lm(VIX ~ SPTR, data = ProjC_1_Data)
+require(lmtest)
+coeftest(vixOnMkt_1, vcov = NeweyWest(vixOnMkt_1, lag = 6, adjust = T, verbose=T))
+# Insignicate intercept, probably shouldn't be considered as another "factor"
+
+```
+
+
+Problem #2
+2.a
+Give the annualized return, volatility, and Sharpe ratio (using rf=0) for the strategy.
+```{r}
+require(readxl)
+
+# Read the strategy return data copied from portfolio analysis sheet
+C2_strategyRet <- read_excel('ProjC2.xlsx', sheet = 1, col_names = TRUE)
+# head(C2_strategyRet)
+C2_strategyRet$`Row Labels` <- as.Date(C2_strategyRet$`Row Labels`, '%m/%d/%Y')
+
+retAnnualInfo <- function(returns, rf = 0) {
+  mean <- 252*mean(returns) * 100
+  print(paste("Annualized Mean:", round(mean,2), "%"))
+  sd <- sqrt(252)*sd(returns) * 100
+  print(paste("Annualized Standard Deviation:", round(sd,2), "%"))
+  sr <- (mean-rf)/sd
+  print(paste("Annualized Sharpe Ratio:", round(sr,2)))
+  return(c(mean, sd, sr))
+}
+
+colnames(C2_strategyRet)[4] <- "StrategyRet"
+retAnnualInfo(C2_strategyRet$StrategyRet)
+
+```
+
+2.b & c
+Use linear regression to report on the CAPM alpha, beta, and R-squared for the strategy, including standard errors of your estimates and t-statistics.
+
+Then extend this regression model to include Fama-French factors.
+```{r}
+# Read the FF3 data
+C2_FF <- read.csv('ProjC2_query1.txt', header = TRUE)
+# head(C2_FF)
+C2_FF$d <- as.Date(C2_FF$d, '%Y-%m-%d')
+
+# Merge into a dataframe 
+colnames(C2_strategyRet)[1] <- "d"
+C2_dataMerged <- merge(C2_strategyRet, C2_FF, by = c("d"))
+# head(C2_dataMerged)
+
+require(lmtest)
+require(sandwich)
+print("For CAPM:")
+CAPM2b <- lm(StrategyRet ~ mktrf, data = C2_dataMerged)
+coeftest(CAPM2b, vcov = NeweyWest(CAPM2b, lag = 6, adjust = T, verbose=T))
+summary(CAPM2b)
+
+print("For FF3:")
+CAPM2c <- lm(StrategyRet ~ mktrf + smb + hml, data = C2_dataMerged)
+coeftest(CAPM2c, vcov = NeweyWest(CAPM2c, lag = 6, adjust = T, verbose=T))
+summary(CAPM2c)
+
+
+```
+
+2.d
+Plot the strategy one-day returns in order, from lowest to highest.
+```{r}
+# ggplot(data = C2_dataMerged, aes(x = d[order(StrategyRet)], y = sort(StrategyRet))) + geom_point()
+qplot(StrategyRet, data = C2_dataMerged)
+
+# Define winner based on market excess return
+C2_dataMerged$win <- as.numeric(C2_dataMerged$StrategyRet > C2_dataMerged$mktrf)
+
+print(sprintf("Fraction of winners: %f", length(which(C2_dataMerged$win == 1))/dim(C2_dataMerged)[1]))
+print(sprintf("Fraction of losers: %f", length(which(C2_dataMerged$win == 0))/dim(C2_dataMerged)[1]))
+writeLines("")
+
+# qplot(StrategyRet, data = C2_dataMerged, geom = c("boxplot")) + coord_flip()
+qplot( x = factor(win), y = StrategyRet, data = C2_dataMerged, geom = c("boxplot")) + labs(title = "Boxplot for 'losers' and 'Winners' ")
+
+print(sprintf("Median of winners: %f", median(C2_dataMerged$StrategyRet[which(C2_dataMerged$win == 1)]) ))
+print(sprintf("Median of losers: %f", median(C2_dataMerged$StrategyRet[which(C2_dataMerged$win == 0)]) ))
+
+```
+
+Problem #3
+3.a
+```{r}
+# Read the strategy return data copied from portfolio analysis sheet
+C3_strategyRet <- read_excel('ProjC3.xlsx', sheet = 1, col_names = TRUE)
+# head(C3_strategyRet)
+C3_strategyRet$`Row Labels` <- as.Date(C3_strategyRet$`Row Labels`, '%m/%d/%Y')
+
+colnames(C3_strategyRet)[4] <- "StrategyRet"
+print("For strategy overall:")
+retAnnualInfo(C3_strategyRet$StrategyRet)
+writeLines("")
+
+print("For long positions:")
+retAnnualInfo(C3_strategyRet$Long)
+writeLines("")
+
+print("For short positions:")
+retAnnualInfo(C3_strategyRet$Short)
+writeLines("")
+
+```
+
+3.b
+Use linear regression to report on the CAPM alpha, beta, and R-squared for the strategy, including standard errors of your estimates and t-statistics.
+
+```{r}
+# Read the FF3 data
+C3_FF <- read.csv('ProjC3_query1.txt', header = TRUE)
+# head(C3_FF)
+C3_FF$d <- as.Date(C3_FF$d, '%Y-%m-%d')
+
+# Merge into a dataframe 
+colnames(C3_strategyRet)[1] <- "d"
+C3_dataMerged <- merge(C3_strategyRet, C3_FF, by = c("d"))
+# head(C3_dataMerged)
+
+print("For CAPM:")
+CAPM3b <- lm(StrategyRet ~ mktrf, data = C3_dataMerged)
+coeftest(CAPM3b, vcov = NeweyWest(CAPM3b, lag = 6, adjust = T, verbose=T))
+summary(CAPM3b)
+
+print("For FF3:")
+CAPM3c <- lm(StrategyRet ~ mktrf + smb + hml, data = C3_dataMerged)
+coeftest(CAPM3c, vcov = NeweyWest(CAPM3c, lag = 6, adjust = T, verbose=T))
+summary(CAPM3c)
+
+```
+
+3.c
+Plot the strategy one-day returns in order, from lowest to highest.
+```{r}
+qplot(StrategyRet, data = C3_dataMerged)
+
+# Define winner based on market excess return
+C3_dataMerged$win <- as.numeric(C3_dataMerged$StrategyRet > C3_dataMerged$mktrf)
+
+print(sprintf("Fraction of winners: %f", length(which(C3_dataMerged$win == 1))/dim(C3_dataMerged)[1]))
+print(sprintf("Fraction of losers: %f", length(which(C3_dataMerged$win == 0))/dim(C3_dataMerged)[1]))
+writeLines("")
+
+qplot( x = factor(win), y = StrategyRet, data = C3_dataMerged, geom = c("boxplot")) + labs(title = "Boxplot for 'losers' and 'Winners' ")
+
+print(sprintf("Median of winners: %f", median(C3_dataMerged$StrategyRet[which(C3_dataMerged$win == 1)]) ))
+print(sprintf("Median of losers: %f", median(C3_dataMerged$StrategyRet[which(C3_dataMerged$win == 0)]) ))
+
+```
+
+
+Problem 4 Data
+4.a 
+For each GICS sector, give its highest and lowest net exposure over the period 2005-2009.
+```{r}
+
+c4a_long <- read_excel("ProjC4a.xlsx", sheet = 1, col_names = TRUE)
+c4a_long$TradeDate <- as.Date(c4a_long$TradeDate, "%m/%d/%Y")
+head(c4a_long)
+
+require(tidyr)
+
+c4a_wide <- spread(c4a_long, key = Sector, value = Weight)
+
+# head(c4a_wide)
+
+maxIgnoreNA <- function(x){
+  return(max(x, na.rm = TRUE))
+}
+
+minIgnoreNA <- function(x){
+  return(min(x, na.rm = TRUE))
+}
+
+sectorMax <- apply(c4a_wide[,-1], MARGIN=2, maxIgnoreNA)
+sectorMin <- apply(c4a_wide[,-1], MARGIN=2, minIgnoreNA)
+
+print("Highest net exposure: ")
+sectorMax
+
+writeLines("")
+
+print("Lowest net exposure: ")
+sectorMin
+
+
+```
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
