@@ -1,0 +1,383 @@
+---
+title: "15.433 Assignment4 Ce"
+output: html_notebook
+---
+
+Exercise 1
+```{r}
+# set the working directory for RStudio
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+# Read data
+require(readxl)
+Ex1 <- read_excel("assignment4a.xlsx" ,sheet = 1, col_names = TRUE)
+
+# str(Ex1)
+
+#Calculate excess return
+Ex1[,2:6] <- Ex1[,2:6] - Ex1$`30 Day T-Bill`
+# head(Ex1)
+# tail(Ex1)
+```
+
+Part (a)
+```{r}
+
+exRet_1a <- apply(Ex1[,2:6], MARGIN = 2, mean)
+cov_1a <- cov(Ex1[,2:6], Ex1[,2:6])
+
+minVarPortW <- function(CovMat){
+  weightsRaw <- solve(CovMat) %*% rep(1, dim(CovMat)[1])
+  # weightsSum <- as.numeric(t(rep(1, dim(CovMat)[1])) %*% solve(CovMat) %*% rep(1, dim(CovMat)[1]))
+  weightsSum <- sum(weightsRaw)
+  return(weightsRaw/weightsSum)
+}
+
+tangencyPortW <- function(ExRet, CovMat){
+  weightsRaw <- solve(CovMat) %*% ExRet
+  # weightsSum <- as.numeric(t(rep(1, dim(CovMat)[1])) %*% solve(CovMat) %*% ExRet
+  weightsSum <- sum(weightsRaw)
+  return(weightsRaw/weightsSum)
+}
+
+minVarW_1a <- minVarPortW(cov_1a)
+tangencyW_1a <- tangencyPortW(exRet_1a, cov_1a)
+
+# as.matrix(Ex1[1,2:6]) %*% minVarW_1a
+
+portRet_1 <- function(periodRet, weights){
+  # return(as.matrix(periodRet) %*% weights)
+  return(as.vector(periodRet) %*% weights)
+}
+
+minVarExRets <- apply(Ex1[, 2:6], MARGIN = 1, FUN = portRet_1, weights = minVarW_1a)
+print(sprintf("Minimum variance portfolio excess return mean: %f and sd: %f", mean(minVarExRets), sd(minVarExRets)))
+
+writeLines("")
+
+tangencyExRets <- apply(Ex1[, 2:6], MARGIN = 1, FUN = portRet_1, weights = tangencyW_1a)
+print(sprintf("Tangency portfolio excess return mean: %f and sd: %f", mean(tangencyExRets), sd(tangencyExRets)))
+
+writeLines("")
+
+exRetRound_1a <- round(exRet_1a, digits = 2)
+
+print("Orignial tangency portfolio weights: ")
+tangencyPortW(exRet_1a, cov_1a)
+
+writeLines("")
+
+print("Tangency portfolio weights with rounding: ")
+tangencyPortW(exRetRound_1a, cov_1a)
+
+
+```
+
+
+Part (b)
+```{r}
+
+exRet_1b <- exRet_1a
+require(matsbyname)
+cov_1b <- identize_byname(cov_1a)
+
+print("Orignial tangency portfolio weights: ")
+tangencyPortW(exRet_1b, cov_1b)
+
+writeLines("")
+
+exRetRound_1b <- exRetRound_1a
+print("Tangency portfolio weights with rounding: ")
+tangencyPortW(exRetRound_1b, cov_1b)
+
+
+```
+
+Part (c)
+```{r}
+beta_1c <- as.vector(c(0.6, 0.7, 1.2, 0.9, 1.2))
+mktPrem_1c <- 0.5
+
+exRet_1c <- beta_1c*mktPrem_1c
+names(exRet_1c) <- names(exRet_1b)
+
+cov_1c <- cov_1a
+
+print("Tangency portfolio weights: ")
+tangencyPortW(exRet_1c, cov_1c)
+
+```
+
+
+Part (d)
+```{r}
+
+exRet_1d <- (exRet_1a + exRet_1c)/2
+covAPriori_1d <- mean(diag(cov_1a)) * diag(length(exRet_1d))
+cov_1d <- (cov_1a + covAPriori_1d)/2
+
+print("Tangency portfolio weights: ")
+tangencyPortW(exRet_1d, cov_1d)
+
+```
+
+Part (e)
+```{r}
+startT_1e <- 61
+exRetDF_1e <- data.frame(Ex1[,2:6])
+
+Strategy1Ret_1e <- function(exRetDF){
+  exRetDFPast <- exRetDF[-dim(exRetDF)[1],]
+  exRet_1a <- apply(exRetDFPast, MARGIN = 2, mean)
+  cov_1a <- cov(exRetDFPast, exRetDFPast)
+  tangencyW_1a <- tangencyPortW(exRet_1a, cov_1a)
+  newExRet <- as.matrix(exRetDF[dim(exRetDF)[1],]) %*% tangencyW_1a
+  return(newExRet)
+}
+
+Strategy2Ret_1e <- function(exRetDF){
+  exRetDFPast <- exRetDF[-dim(exRetDF)[1],]
+  exRet_1b <- apply(exRetDFPast, MARGIN = 2, mean)
+  cov_1b <- diag(length(exRet_1b))
+  tangencyW_1b <- tangencyPortW(exRet_1b, cov_1b)
+  newExRet <- as.matrix(exRetDF[dim(exRetDF)[1],]) %*% tangencyW_1b
+  return(newExRet)
+}
+
+Strategy3Ret_1e <- function(exRetDF){
+  beta_1c <- as.vector(c(0.6, 0.7, 1.2, 0.9, 1.2))
+  mktPrem <- 0.5
+  exRet_1c <- beta_1c*mktPrem_1c
+  
+  exRetDFPast <- exRetDF[-dim(exRetDF)[1],]
+  cov_1c <- cov(exRetDFPast, exRetDFPast)
+  
+  tangencyW_1c <- tangencyPortW(exRet_1c, cov_1c)
+  newExRet <- as.matrix(exRetDF[dim(exRetDF)[1],]) %*% tangencyW_1c
+  return(newExRet)
+}
+
+Strategy4Ret_1e <- function(exRetDF){
+  beta_1c <- as.vector(c(0.6, 0.7, 1.2, 0.9, 1.2))
+  mktPrem <- 0.5
+  exRet_1c <- beta_1c*mktPrem_1c
+  
+  exRetDFPast <- exRetDF[-dim(exRetDF)[1],]
+  exRet_1a <- apply(exRetDFPast, MARGIN = 2, mean)
+  cov_1a <- cov(exRetDFPast, exRetDFPast)
+  
+  exRet_1d <- (exRet_1a + exRet_1c)/2
+  covAPriori_1d <- mean(diag(cov_1a)) * diag(length(exRet_1d))
+  cov_1d <- (cov_1a + covAPriori_1d)/2
+  
+  tangencyW_1d <- tangencyPortW(exRet_1d, cov_1d)
+  newExRet <- as.matrix(exRetDF[dim(exRetDF)[1],]) %*% tangencyW_1d
+  return(newExRet)
+}
+
+allStrategyRets_1e <- function(exRetDF){
+  first <- Strategy1Ret_1e(exRetDF)
+  second <- Strategy2Ret_1e(exRetDF)
+  third <- Strategy3Ret_1e(exRetDF)
+  fourth <- Strategy4Ret_1e(exRetDF)
+  return(c(first, second, third, fourth))
+}
+
+time_1e <- seq(startT_1e, dim(exRetDF_1e)[1], 1)
+returns_1e <- t(sapply(time_1e, function(time) allStrategyRets_1e(exRetDF_1e[1:time,]) ))
+
+colnames(returns_1e) <- c("Strategy a", "Strategy b", "Strategy c", "Strategy d")
+
+retMeans_1e <- apply(returns_1e, MARGIN = 2, FUN = mean)
+
+retSD_1e <- apply(returns_1e, MARGIN = 2, FUN = sd)
+
+SR_1e <- retMeans_1e/retSD_1e
+
+print("Monthly average return:")
+retMeans_1e
+
+writeLines("")
+
+print("Monthly return Sharpe ratio:")
+SR_1e
+
+```
+
+
+Exercise 2
+```{r}
+Ex2 <- read_excel("assignment4b.xlsx" , sheet = 1, col_names = TRUE)
+
+require(data.table)
+Ex2$URet <- Ex2$`UBID Price`/shift(Ex2$`UBID Price`) - 1
+Ex2$CRet <- Ex2$`CC Price`/shift(Ex2$`CC Price`) - 1
+
+head(Ex2)
+```
+
+Part (a)
+```{r}
+spinOffShare_2 <- 0.7159
+t1_2 <- 4
+# Initially k shares
+# 1.1*(0.7159*k)*P_U0 = k*P_C0 + 20; solve and get k = 3.736 million shares
+k_2 <- 3.738
+shortInitial_2 <- -0.7159*k_2*Ex2$`UBID Price`[t1_2-1]
+longInitial_2 <- k_2*Ex2$`CC Price`[t1_2-1]
+
+long_2a <- longInitial_2
+short_2a <- shortInitial_2
+
+profit_2a <- 0
+for (t in t1_2:dim(Ex2)[1]){
+  # If mispricing happends last period, assume that we trade at the market close.
+  # Update: no, just assume close at the last day for this problem...
+  # if (spinOffShare_2*Ex2[t-1,2] > Ex2[t-1,3]){
+    profit_2a <- profit_2a + long_2a*Ex2$CRet[t] + short_2a*Ex2$URet[t]
+    long_2a <- long_2a*(1 + Ex2$CRet[t])
+    short_2a <- short_2a*(1 + Ex2$CRet[t])
+  # }
+}
+
+profit_2a
+
+```
+
+
+Part (b)
+```{r}
+t1_2 <- 4
+marginCall_2 <- 1.05
+long_2b <- longInitial_2/2
+short_2b <- shortInitial_2/2
+
+profit_2b <- 0
+for (t in t1_2:dim(Ex2)[1]){
+  # If mispricing happends last period, assume that we trade at the market close.
+  # if (spinOffShare_2*Ex2[t-1,2] > Ex2[t-1,3]){
+    profit_2b <- profit_2b + long_2b*Ex2$CRet[t] + short_2b*Ex2$URet[t]
+    long_2b <- long_2b*(1 + Ex2$CRet[t])
+    short_2b <- short_2b*(1 + Ex2$CRet[t])
+  # }
+  if ((long_2b + 10) < marginCall_2*abs(short_2b)){
+    print(Ex2$date[t])
+    break
+  }
+}
+
+profit_2b
+
+```
+
+
+Part (c)
+```{r}
+
+# |short|:long has to be 4.7755:4.2523 =  1.1230 initially
+long_2c <- 4.2523
+short_2c <- -4.7755
+profits_2c <- rep(0, (dim(Ex2)[1]))
+marginDistance_2c <- rep( (marginCall_2 * abs(short_2c) - long_2c), (dim(Ex2)[1]))
+
+for (t in t1_2:dim(Ex2)[1]){
+  # If mispricing happends last period, assume that we trade at the market close.
+  # if (spinOffShare_2*Ex2[t-1,2] > Ex2[t-1,3]){
+    profits_2c[t] <- profits_2c[t-1] + long_2c*Ex2$CRet[t] + short_2c*Ex2$URet[t]
+    long_2c <- long_2c*(1 + Ex2$CRet[t])
+    short_2c <- short_2c*(1 + Ex2$URet[t])
+    marginDistance_2c[t] <- marginCall_2 * abs(short_2c) - long_2c
+  # }
+}
+
+avoidThreshold_2c <- max(marginDistance_2c)
+
+print(sprintf("Max initial investment cash is %f", 20/avoidThreshold_2c))
+
+```
+
+```{r}
+# 10.00 million cash implies 10.00*4.2523 million long and 10.00*4.7755 million short
+long_2c <- 1.31*4.2523
+short_2c <- -1.31*4.7755
+
+profit_2c <- 0
+for (t in 2:dim(Ex2)[1]){
+  # If mispricing happends last period, assume that we trade at the market close.
+  if (spinOffShare_2*Ex2[t-1,2] > Ex2[t-1,3]){
+    profit_2c <- profit_2c + long_2c*Ex2$CRet[t] + short_2c*Ex2$URet[t]
+    long_2c <- long_2c*(1 + Ex2$CRet[t])
+    short_2c <- short_2c*(1 + Ex2$URet[t])
+  }
+  if ((long_2c + 20) < marginCall_2*abs(short_2c)){
+    print(Ex2$date[t])
+    break
+  }
+}
+
+profit_2c
+```
+
+Exercise 3
+```{r}
+Ex3 <- read_excel("assignment4c.xlsx" , sheet = 1, col_names = TRUE)
+
+Ex3$ComRet <- Ex3$pricecompaq/shift(Ex3$pricecompaq) - 1
+Ex3$HPRet <- Ex3$pricehp/shift(Ex3$pricehp) - 1
+
+# head(Ex3)
+
+receiveShare_3 <- 0.6325
+t1_3 <- 2
+marginCall_3 <- 1.1
+
+# |short|:long has to be 2.9723:2.5667 =  1.1580 initially
+long_3_1 <- 2.5667
+short_3_1 <- -2.9723
+profits_3_1 <- rep(0, (dim(Ex3)[1]))
+marginDistance_3_1 <- rep( (marginCall_3 * abs(short_3_1) - long_3_1), (dim(Ex3)[1]))
+
+for (t in t1_3:nrow(Ex3)){
+  # If mispricing happends last period, assume that we trade at the market close.
+  # 
+  # if (receiveShare_3*Ex3[t-1,2] > Ex3[t-1,3]){
+    profits_3_1[t] <- profits_3_1[t-1] + long_3_1*Ex3$ComRet[t] + short_3_1*Ex3$HPRet[t]
+    long_3_1 <- long_3_1*(1 + Ex3$ComRet[t])
+    short_3_1 <- short_3_1*(1 + Ex3$HPRet[t])
+    marginDistance_3_1[t] <- marginCall_3 * abs(short_3_1) - long_3_1
+  # }
+}
+
+avoidThreshold_3_1 <- max(marginDistance_3_1)
+
+print(sprintf("Max initial investment cash is %f", 50/avoidThreshold_3_1))
+```
+
+```{r}
+# 27.05 million cash implies 27.05*3.2814 million long and 27.05*2.9723 million short
+long_3 <- 27.045*2.5667
+short_3 <- -27.045*2.9723
+
+profit_3 <- 0
+for (t in t1_3:nrow(Ex3)){
+  # If mispricing happends last period, assume that we trade at the market close.
+  # Update: no, just assume close at the last day for this problem...
+  profit_3 <- profit_3 + long_3*Ex3$ComRet[t] + short_3*Ex3$HPRet[t]
+  long_3 <- long_3*(1 + Ex3$ComRet[t])
+  short_3 <- short_3*(1 + Ex3$HPRet[t])
+  if ((long_3 + 50) < marginCall_3*abs(short_3)){
+    print(Ex3$date[t])
+    break
+  }
+}
+
+profit_3
+```
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
