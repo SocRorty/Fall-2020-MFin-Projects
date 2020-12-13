@@ -1,0 +1,1187 @@
+---
+title: "15.458 Project D"
+author: "Group Members: Yayu Zhu, Ce Luo, Jiazhen Huang"
+output: html_notebook
+---
+
+
+```{r setup, include=FALSE}
+library(readr)
+library(ggplot2)
+library(tidyr)
+library(Rcpp)
+library(dplyr)
+library(tm)
+library(tidyverse)
+library(tidytext)
+library(textdata)
+library(e1071)
+library(RTextTools)
+library(text2vec)
+```
+
+
+```{r Read Data}
+# set the working directory for RStudio
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+RCV1Wide_train <- read.csv("rcv1_train_wide_1.txt", header = TRUE)
+RCV1Wide_test <- read.csv("rcv1_test_wide_1.txt", header = TRUE)
+```
+
+
+
+```{r Pre-processing}
+RCV1Top_train <- RCV1Wide_train[which(RCV1Wide_train$h1 != ''), 1:3]
+RCV1H2_train <- RCV1Wide_train[which(RCV1Wide_train$h2 != ''), 1:3]
+RCV1H3_train <- RCV1Wide_train[which(RCV1Wide_train$h3 != ''), 1:3]
+RCV1H4_train <- RCV1Wide_train[which(RCV1Wide_train$h4 != ''), 1:3]
+
+# dim(RCV1Top_train) # Consistent
+# dim(RCV1H2_train)
+# dim(RCV1H3_train)
+# dim(RCV1H4_train)
+
+RCV1H4_test <- RCV1Wide_test[which(RCV1Wide_test$h4 != ''), 1:3]
+
+H4More <- 1e4
+
+set.seed(6)
+RCV1H4_testSample <- RCV1H4_test[sample(nrow(RCV1H4_test), H4More),]
+
+# Merge 10,000 test data to H4 training data
+RCV1H4_enlarged <- rbind(RCV1H4_train, RCV1H4_testSample)
+```
+
+
+Set up the top and deep level data for testing
+```{r Helper functions}
+require(dplyr)
+
+rawTest_size <- H4More + 1e4
+
+RCV1Wide_test_raw <- RCV1Wide_test[(H4More+1):rawTest_size,]
+# RCV1Wide_test_raw <- RCV1Wide_test_raw[which(RCV1Wide_test_raw$id_cat != 0),]
+
+
+wide_topDeep <- function(RCV1Wide_raw, anID){
+  oneIDData <- RCV1Wide_raw[which(RCV1Wide_raw$id == anID),]
+  article <- oneIDData[1,]$article
+  top <- ""
+  id_cat_top <- 0
+  deep <- ""
+  id_cat_deep <- 0
+  deepCount <- 1
+  for (i in 1:nrow(oneIDData)){
+    if (oneIDData$h1[i] != '') {
+      top <- as.character(oneIDData$h1[i]) 
+      id_cat_top <- as.integer(oneIDData$id_cat[i])
+    }
+    else if (oneIDData$h4[i] != ''){
+      deep <- as.character(oneIDData$h4[i])
+      id_cat_deep <- as.integer(oneIDData$id_cat[i])
+      deepCount <- 4
+    }
+    else if (oneIDData$h3[i] != '' & deepCount < 3){
+      deep <- as.character(oneIDData$h3[i])
+      id_cat_deep <- as.integer(oneIDData$id_cat[i])
+      deepCount <- 4
+    }
+    else if (oneIDData$h2[i] != '' & deepCount < 2){
+      deep <- as.character(oneIDData$h2[i])
+      id_cat_deep <- as.integer(oneIDData$id_cat[i])
+      deepCount <- 2
+    }
+  }
+  return(data.frame(id = anID, article = article, id_cat_top = id_cat_top, top = top, id_cat_deep = id_cat_deep, deep = deep))
+}
+
+
+data_wide_topDeep <- function(RCV1Wide_raw){
+  uniqueIDs <- unique(RCV1Wide_raw$id)
+  data_wide_topDeep <- lapply(uniqueIDs,function(ID) wide_topDeep(RCV1Wide_raw, ID)) %>% bind_rows
+  return(data_wide_topDeep)
+}
+
+RCV1Wide_test_topDeep <- data_wide_topDeep(RCV1Wide_test_raw)
+
+RCV1Wide_test_topDeep <- RCV1Wide_test_topDeep[which(RCV1Wide_test_topDeep$id_cat_top != 0),]
+
+RCV1Wide_test_topDeep <- RCV1Wide_test_topDeep[which(RCV1Wide_test_topDeep$id_cat_deep != 0),]
+
+```
+
+
+```{r Top Train}
+require(parallel)
+# require(questionr)
+
+halfAgree <- function(predictions){
+  pickLabels <- predictions[seq(1,length(predictions),2)]
+  labelCounts <- sort(table(as.numeric(pickLabels)), decreasing=TRUE)
+  mostLabel <- labelCounts[1]
+  agree <- mostLabel >= length(predictions)/2/2
+  # print(mostLabel)
+  return(agree)
+}
+
+mostLabel <- function(predictions){
+  pickLabels <- predictions[seq(1,length(predictions),2)]
+  labelCounts <- sort(table(as.numeric(pickLabels)), decreasing=TRUE)
+  mostLabel <- labelCounts[1]
+  # print(names(mostLabel))
+  return(names(mostLabel))
+}
+
+# Prob weighted, change the followings later
+# Turns out working poorly
+# halfAgree <- function(predictions){
+#   pickLabels <- predictions[seq(1,length(predictions),2)]
+#   pickProbs <- predictions[seq(2,length(predictions),2)]
+#   df <- data.frame(labels = as.numeric(pickLabels), probs = as.numeric(pickProbs))
+#   # prob_weight_table <- wtd.table(pickLabels, weights = pickProbs)
+#   labelCounts <- count(x = df, labels, wt = probs)
+#   labelCountsOrder <- labelCounts[order(-labelCounts$n),]
+#   mostLabel <- labelCounts[1,1]
+#   mostLabel_weights <- labelCounts[1,2]
+#   # agree <- mostLabel_weights >= sum(labelCounts[,2])/2
+#   agree <- mostLabel_weights >= length(labelCounts[,2])
+#   return(agree)
+# }
+# 
+# mostLabel <- function(predictions){
+#   pickLabels <- predictions[seq(1,length(predictions),2)]
+#   pickProbs <- predictions[seq(2,length(predictions),2)]
+#   df <- data.frame(labels = as.numeric(pickLabels), probs = as.numeric(pickProbs))
+#   # prob_weight_table <- wtd.table(pickLabels, weights = pickProbs)
+#   labelCounts <- count(x = df, labels, wt = probs)
+#   labelCountsOrder <- labelCounts[order(-labelCounts$n),]
+#   mostLabel <- labelCounts[1,1]
+#   return(mostLabel)
+# }
+
+# Function for the top level
+# PS: later merged with the deep level as we will always predict the top level before the deep level
+RCV1TrainTestClassify_Top <- function(RCV1Wide_test_topDeep, RCV1Top_train_0 = RCV1Top_train){
+  # RCV1Wide_test_topDeep$id_cat <- RCV1Wide_test_topDeep$id_cat_top
+  NTop_train <- nrow(RCV1Top_train); NTop_train_train <- 15000; NTop_test <- nrow(RCV1Wide_test_topDeep)
+  rbindArticle <- vctrs::vec_c(RCV1Top_train$article[1:NTop_train_train], RCV1Wide_test_topDeep$article)
+  rbindID_cat <- vctrs::vec_c(RCV1Top_train$id_cat[1:NTop_train_train], RCV1Wide_test_topDeep$id_cat_top)
+  
+  sparseThreshold <- 0.01
+  RCV1Top_train_matrix <- create_matrix(rbindArticle, language = "English",removeNumbers = TRUE, stemWords = FALSE, removeSparseTerms = (1-sparseThreshold))
+  RCV1Top_train_container <- create_container(RCV1Top_train_matrix, rbindID_cat ,trainSize = 1:NTop_train_train, testSize = (NTop_train_train+1):(NTop_train_train+NTop_test), virgin=FALSE)
+  
+  timeStart <- Sys.time()
+  
+  numCore <- detectCores(logical = TRUE)
+  
+  clust <- makeCluster(numCore)
+    
+  clusterEvalQ(clust, require(RTextTools))
+  
+  clusterExport(clust, varlist = c("RCV1Top_train_container") )
+  
+  models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+  topModels <- parLapply(clust, models, function(model) train_models(RCV1Top_train_container, model) )
+  
+  topModelsClassify <- parLapply(clust, topModels, function(model) classify_models(RCV1Top_train_container, model))
+  
+  timeEnd <- Sys.time(); print(timeEnd - timeStart)
+  
+  stopCluster(clust)
+  
+  topClassify_train_test <- bind_cols(topModelsClassify)
+  
+  RCV1Top_train_analytics <- create_analytics(RCV1Top_train_container, topClassify_train_test )
+  
+  print(summary(RCV1Top_train_analytics))
+  
+  labelEnsembleTop <- apply(topClassify_train_test, MARGIN = 1, FUN = mostLabel)
+  
+  trueTop <- RCV1Wide_test_topDeep$id_cat_top
+  
+  topClassify_train_test_True <- cbind(trueTop, labelEnsembleTop, topClassify_train_test)
+  
+  return( topClassify_train_test_True )
+}
+
+# RCV1TrainTestClassify_Top(RCV1Wide_test_topDeep)
+```
+
+
+Deep level classification algorithm (with default parameters), which output the top and deep true and predicted label.
+```{r Deep Train}
+RCV1TrainTestClassify_Deep <- function(RCV1Wide_test_topDeep, RCV1Top_train_0 = RCV1Top_train, RCV1H2_train_0 = RCV1H2_train, RCV1H3_train_0 = RCV1H3_train, RCV1H4_enlarged_0 = RCV1H4_enlarged,  sparseThreshold = 0.01){
+  
+  RCV1Wide_test_topDeep$id_cat <- RCV1Wide_test_topDeep$id_cat_deep
+  
+  NTop_train <- nrow(RCV1Top_train); NTop_train_train <- 5000; NTop_test <- nrow(RCV1Wide_test_topDeep)
+
+  # NH4_enlarged <- nrow(RCV1H4_enlarged); NH4_enlarged_train <- 15000; NH4_enlarged_test <- NH4_enlarged - NH4_enlarged_train
+  
+  rbindArticle <- vctrs::vec_c(RCV1Top_train$article[1:NTop_train_train], RCV1Wide_test_topDeep$article)
+  rbindID_cat_top <- vctrs::vec_c(RCV1Top_train$id_cat[1:NTop_train_train], RCV1Wide_test_topDeep$id_cat_top)
+  
+  RCV1Top_train_matrix <- create_matrix(rbindArticle, language = "English",removeNumbers = TRUE, stemWords = FALSE, removeSparseTerms = (1-sparseThreshold))
+  RCV1Top_train_container <- create_container(RCV1Top_train_matrix, rbindID_cat_top ,trainSize = 1:NTop_train_train, testSize = (NTop_train_train+1):(NTop_train_train+NTop_test), virgin=FALSE)
+  
+  timeStart <- Sys.time()
+  
+  numCore <- detectCores(logical = TRUE)
+  
+  clust <- makeCluster(numCore)
+    
+  clusterEvalQ(clust, require(RTextTools))
+  
+  clusterExport(clust, varlist = c("RCV1Top_train_container") , envir=environment())
+  
+  models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+  topModels <- parLapply(clust, models, function(model) train_models(RCV1Top_train_container, model) )
+  
+  topModelsClassify <- parLapply(clust, topModels, function(model) classify_models(RCV1Top_train_container, model))
+  
+  timeEnd <- Sys.time(); print(timeEnd - timeStart)
+  
+  stopCluster(clust)
+  
+  topClassify_train_test <- bind_cols(topModelsClassify)
+  
+  RCV1Top_train_analytics <- create_analytics(RCV1Top_train_container, topClassify_train_test )
+  
+  print("For Top level:")
+  print(summary(RCV1Top_train_analytics))
+  
+  agreeTop <- apply(topClassify_train_test, MARGIN = 1, FUN = halfAgree)
+  
+  agreeTop_F <- as.numeric(which(agreeTop == FALSE))
+  agreeTop_T <- as.numeric(which(agreeTop == TRUE))
+  
+  # labelTop <- apply(topClassify_train_test[agreeTop_F,], MARGIN = 1, FUN = mostLabel)
+  # Record the top level for all
+  labelEnsembleTop <- apply(topClassify_train_test, MARGIN = 1, FUN = mostLabel)
+  # print(length(labelEnsembleTop))
+  # Also create one for the deep
+  labelEnsembleDeep <- apply(topClassify_train_test, MARGIN = 1, FUN = mostLabel)
+  
+  trueTop <- RCV1Wide_test_topDeep$id_cat_top
+  
+  # topClassify_train_test_True <- cbind(trueTop, labelEnsembleTop, topClassify_train_test)
+  
+  toLevel_3 <- RCV1Wide_test_topDeep[agreeTop_T,]
+  toLevel_3N <- length(agreeTop_T)
+  
+  
+  NH3_train <- nrow(RCV1H3_train); NH3_train_train <- 5000; NH3_test <- toLevel_3N
+  
+  rbindArticle_h3 <- vctrs::vec_c(RCV1H3_train$article[1:NH3_train_train], toLevel_3$article)
+  rbindID_cat_h3 <- vctrs::vec_c(RCV1H3_train$id_cat[1:NH3_train_train], toLevel_3$id_cat_deep)
+  # rbindID_cat_h3 <- RCV1H3_train$article[1:NH3_train_train]
+  
+  RCV1H3_train_matrix <- create_matrix(rbindArticle_h3, language = "English",removeNumbers = TRUE, stemWords = FALSE, removeSparseTerms = (1-sparseThreshold))
+  
+  RCV1H3_train_container <- create_container(RCV1H3_train_matrix, rbindID_cat_h3 ,trainSize = 1:NH3_train_train, testSize = (NH3_train_train+1):(NH3_train_train+toLevel_3N), virgin=TRUE)
+  
+  
+  timeStart <- Sys.time()
+  
+  numCore <- detectCores(logical = TRUE)
+  
+  clust <- makeCluster(numCore)
+    
+  clusterEvalQ(clust, require(RTextTools))
+  
+  clusterExport(clust, varlist = c("RCV1H3_train_container"), envir=environment() )
+  
+  models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+  h3Models <- parLapply(clust, models, function(model) train_model(RCV1H3_train_container, model) )
+
+  h3ModelsClassify <- parLapply(clust, h3Models, function(model) classify_model(RCV1H3_train_container, model))
+  
+  timeEnd <- Sys.time(); print(timeEnd - timeStart)
+  
+  stopCluster(clust)
+  
+  
+  h3Classify_train_test <- bind_cols(h3ModelsClassify)
+  
+  # RCV1H3_train_analytics <- create_analytics(RCV1H3_train_container, h3Classify_train_test )
+
+  # print("For h3 level:")
+  # print(summary(RCV1H3_train_analytics))
+  
+  labelEnsembleH3 <- apply(h3Classify_train_test, MARGIN = 1, FUN = mostLabel)
+  
+  # Update labels
+  # labelEnsembleDeep[agreeH2_T] = labelEnsembleH3
+  labelEnsembleDeep[agreeTop_T] = labelEnsembleH3
+  
+  agreeH3 <- apply(h3Classify_train_test, MARGIN = 1, FUN = halfAgree)
+  
+  agreeH3_F <- as.numeric(which(agreeH3 == FALSE))
+  agreeH3_T <- as.numeric(which(agreeH3 == TRUE))
+  
+  
+  toLevel_4 <- RCV1Wide_test_topDeep[ agreeTop_T[agreeH3_T],]
+  toLevel_4N <- length(agreeH3_T)
+  
+  NH4_train <- nrow(RCV1H4_enlarged); NH4_enlarged_train <- 2e4; NH4_test <- toLevel_4
+  # NH4_train <- nrow(RCV1H4_enlarged); NH4_enlarged_train <- 3000; NH4_test <- toLevel_4
+  
+  rbindArticle_h4 <- vctrs::vec_c(RCV1H4_enlarged$article[1:NH4_enlarged_train], toLevel_4$article)
+  rbindID_cat_h4 <- vctrs::vec_c(RCV1H4_enlarged$id_cat[1:NH4_enlarged_train], toLevel_4$id_cat_deep) 
+  
+  RCV1H4_enlarged_matrix <- create_matrix(rbindArticle_h4, language = "English",removeNumbers = TRUE, stemWords = FALSE, removeSparseTerms = (1-sparseThreshold))
+  
+  RCV1H4_enlarged_container <- create_container(RCV1H4_enlarged_matrix, rbindID_cat_h4 ,trainSize = 1:NH4_enlarged_train, testSize = (NH4_enlarged_train+1):(NH4_enlarged_train+toLevel_4N), virgin=TRUE)
+  
+  timeStart <- Sys.time()
+  
+  numCore <- detectCores(logical = TRUE)
+  
+  clust <- makeCluster(numCore)
+    
+  clusterEvalQ(clust, require(RTextTools))
+  
+  clusterExport(clust, varlist = c("RCV1H4_enlarged_container") , envir=environment())
+  
+  models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+  h4Models <- parLapply(clust, models, function(model) train_model(RCV1H4_enlarged_container, model) )
+
+  h4ModelsClassify <- parLapply(clust, h4Models, function(model) classify_model(RCV1H4_enlarged_container, model))
+  
+  timeEnd <- Sys.time(); print(timeEnd - timeStart)
+  
+  stopCluster(clust)
+  
+  h4Classify_enlarged_test <- bind_cols(h4ModelsClassify)
+  
+  # RCV1H4_enlarged_analytics <- create_analytics(RCV1H4_enlarged_container, h4Classify_enlarged_test )
+
+  # print("For h4 level:")
+  # print(summary(RCV1H4_enlarged_analytics))
+  
+  labelEnsembleH4 <- apply(h4Classify_enlarged_test, MARGIN = 1, FUN = mostLabel)
+  
+  # Update
+  labelEnsembleDeep[agreeTop_T[agreeH3_T]] = labelEnsembleH4
+  
+  trueDeep <- RCV1Wide_test_topDeep$id_cat_deep
+  
+  deepClassify_train_test_True <- data.frame(trueTop = as.integer(trueTop), labelEnsembleTop = as.integer(labelEnsembleTop), trueDeep = as.integer(trueDeep), labelEnsembleDeep = as.integer(labelEnsembleDeep))
+  
+  return( deepClassify_train_test_True )
+}
+
+# topDeepClassify_test <- RCV1TrainTestClassify_Deep(RCV1Wide_test_topDeep)
+topDeepClassify_test
+```
+
+Define the function for outputing the evaluation metrics for the top and the deep level
+```{r Performance metrics}
+metricsSummary <- function(topDeepClassify_test){
+  # topDeepClassify_test["trueTop"]
+  confMat_top <- as.matrix(table(Actual = topDeepClassify_test$trueTop, Predicted = topDeepClassify_test$labelEnsembleTop))
+
+  print("Top level confusion matrix")
+  print(confMat_top)
+
+  top_metrics <- ml_test(topDeepClassify_test$labelEnsembleTop, true = topDeepClassify_test$trueTop, output.as.table = TRUE)
+
+  top_accuracy <- ml_test(topDeepClassify_test$labelEnsembleTop, true = topDeepClassify_test$trueTop, output.as.table = FALSE)$accuracy
+
+  # top_metrics
+
+  top_precision_mean <- mean(top_metrics$precision, na.rm = TRUE)
+
+  top_recall_mean <- mean(top_metrics$recall, na.rm = TRUE)
+
+
+  deepLabelUnions <- union(topDeepClassify_test$trueDeep, topDeepClassify_test$labelEnsembleDeep)
+
+  deep_metrics <- ml_test( factor(topDeepClassify_test$labelEnsembleDeep, deepLabelUnions), true = factor(topDeepClassify_test$trueDeep, deepLabelUnions), output.as.table = TRUE)
+
+  deep_accuracy <- ml_test( factor(topDeepClassify_test$labelEnsembleDeep, deepLabelUnions), true = factor(topDeepClassify_test$trueDeep, deepLabelUnions), output.as.table = FALSE)$accuracy
+
+  deep_precision_mean <- mean(deep_metrics$precision, na.rm = TRUE)
+
+  deep_recall_mean <- mean(deep_metrics$recall, na.rm = TRUE)
+
+  writeLines("")
+
+  return(data.frame(top_accuracy = top_accuracy, top_precision_mean = top_precision_mean, top_recall_mean = top_recall_mean, deep_accuracy = deep_accuracy, deep_precision_mean = deep_precision_mean, deep_recall_mean = deep_recall_mean))
+}
+
+
+# metrics_sparseTuninng <- lapply(topDeepClassify_test,  metricsSummary)
+
+metricsSummary(topDeepClassify_test)
+```
+
+
+Tuning the sparse threshold for the tfidf matrix
+```{r Sparseness Tuning}
+sparseValues <- seq(0.005, 0.03, 0.005)
+
+topDeepClassify_results <- vector("list", length(sparseValues))
+
+for (i in 1:length(sparseValues)){
+  topDeepClassify_results[[i]] <- RCV1TrainTestClassify_Deep(RCV1Wide_test_topDeep, sparseThreshold = sparseValues[i])
+}
+
+setNames(topDeepClassify_results, sparseValues)
+
+# topDeepClassify_results
+
+metrics_sparseTuninng <- bind_rows(lapply(topDeepClassify_results,  metricsSummary))
+
+row.names(metrics_sparseTuninng) <- sparseValues
+
+metrics_sparseTuninng
+```
+
+0.02 seems to be the best for the sparse threshold. 
+
+Parameter tuning for the classfiers at each level:
+
+Top cross_validate
+```{r Top cross_validate}
+sparseThreshold <- 0.02
+
+NTop_train <- nrow(RCV1Top_train); NTop_train_train <- 5000; NTop_train_test <- 2500
+
+RCV1Top_train_matrix <- create_matrix(RCV1Top_train$article, language = "English",removeNumbers = TRUE, stemWords = FALSE, removeSparseTerms = (1-sparseThreshold))
+
+RCV1Top_train_container <- create_container(RCV1Top_train_matrix, RCV1Top_train$id_cat, trainSize = 1:NTop_train_train, testSize = (NTop_train_train+1):(NTop_train_train+NTop_train_test), virgin=FALSE)
+```
+
+SVM Top Tune
+```{r SVM Top Tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1Top_train_container", "models") )
+
+SVMcosts <- 2^(1:8)
+
+topSVM_CV <- parLapply(clust, SVMcosts, function(cost) cross_validate(RCV1Top_train_container, nfold = 4, algorithm = models, cost = cost) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(topSVM_CV) <- SVMcosts
+
+topSVM_CV
+```
+
+Boosting Top tune
+```{r Boosting Top tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1Top_train_container", "models") )
+
+maxBoost <- seq(50, 300, 25)
+
+topBoostMax_CV <- parLapply(clust, maxBoost, function(maxB) cross_validate(RCV1Top_train_container, nfold = 4, algorithm = models, maxitboost = maxB) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(topBoostMax_CV) <- maxBoost
+
+topBoostMax_CV
+```
+
+GLMNET Top tune
+```{r GLMNET Top tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1Top_train_container", "models") )
+
+maxGlm <- 10^(1:6)
+
+topGLMMax_CV <- parLapply(clust, maxGlm, function(maxG) cross_validate(RCV1Top_train_container, nfold = 4, algorithm = models, maxitglm = maxG) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(topGLMMax_CV) <- maxGlm
+
+topGLMMax_CV
+```
+
+RF Top tune
+```{r RF Top tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1Top_train_container", "models") )
+
+RF_ntree <- seq(50, 300, 25)
+
+topRFT_ntree_CV <- parLapply(clust, RF_ntree, function(ntree) cross_validate(RCV1Top_train_container, nfold = 4, algorithm = models, ntree = ntree) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(topRFT_ntree_CV) <- RF_ntree
+
+topRFT_ntree_CV
+```
+
+H2 cross_validate
+```{r H2 cross_validate}
+sparseThreshold <- 0.02
+
+NH2_train <- nrow(RCV1H2_train); NH2_train_train <- 5000; NH2_train_test <- 2500
+
+RCV1H2_train_matrix <- create_matrix(RCV1H2_train$article, language = "English",removeNumbers = TRUE, stemWords = FALSE, removeSparseTerms = (1-sparseThreshold))
+
+RCV1H2_train_container <- create_container(RCV1H2_train_matrix, RCV1H2_train$id_cat, trainSize = 1:NH2_train_train, testSize = (NH2_train_train+1):(NH2_train_train+NH2_train_test), virgin=FALSE)
+```
+
+SVM H2 Tune
+```{r SVM H2 Tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1H2_train_container", "models") )
+
+SVMcosts <- 2^(1:8)
+
+h2SVM_CV <- parLapply(clust, SVMcosts, function(cost) cross_validate(RCV1H2_train_container, nfold = 4, algorithm = models, cost = cost) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(h2SVM_CV) <- SVMcosts
+
+h2SVM_CV
+```
+
+Boosting H2 tune
+```{r Boosting H2 tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1H2_train_container", "models") )
+
+maxBoost <- seq(50, 300, 25)
+
+h2BoostMax_CV <- parLapply(clust, maxBoost, function(maxB) cross_validate(RCV1H2_train_container, nfold = 4, algorithm = models, maxitboost = maxB) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(h2BoostMax_CV) <- maxBoost
+
+h2BoostMax_CV
+```
+
+GLMNET H2 tune
+```{r GLMNET H2 tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1H2_train_container", "models") )
+
+maxGlm <- 10^(1:6)
+
+h2GLMMax_CV <- parLapply(clust, maxGlm, function(maxG) cross_validate(RCV1H2_train_container, nfold = 4, algorithm = models, maxitglm = maxG) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(h2GLMMax_CV) <- maxGlm
+
+h2GLMMax_CV
+```
+
+RF H2 tune
+```{r RF H2 tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1H2_train_container", "models") )
+
+RF_ntree <- seq(50, 300, 25)
+
+h2RFT_ntree_CV <- parLapply(clust, RF_ntree, function(ntree) cross_validate(RCV1H2_train_container, nfold = 4, algorithm = models, ntree = ntree) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(h2RFT_ntree_CV) <- RF_ntree
+
+h2RFT_ntree_CV
+```
+
+H3 cross_validate
+```{r H3 cross_validate}
+sparseThreshold <- 0.02
+
+NH3_train <- nrow(RCV1H3_train); NH3_train_train <- 5000; NH3_train_test <- 2500
+
+RCV1H3_train_matrix <- create_matrix(RCV1H3_train$article, language = "English",removeNumbers = TRUE, stemWords = FALSE, removeSparseTerms = (1-sparseThreshold))
+
+RCV1H3_train_container <- create_container(RCV1H3_train_matrix, RCV1H3_train$id_cat, trainSize = 1:NH3_train_train, testSize = (NH3_train_train+1):(NH3_train_train+NH3_train_test), virgin=FALSE)
+```
+
+SVM H3 Tune
+```{r SVM H3 Tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1H3_train_container", "models") )
+
+SVMcosts <- 2^(1:8)
+
+h3SVM_CV <- parLapply(clust, SVMcosts, function(cost) cross_validate(RCV1H3_train_container, nfold = 4, algorithm = models, cost = cost) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(h3SVM_CV) <- SVMcosts
+
+h3SVM_CV
+```
+
+Boosting H3 tune
+```{r Boosting H3 tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1H3_train_container", "models") )
+
+maxBoost <- seq(50, 300, 25)
+
+h3BoostMax_CV <- parLapply(clust, maxBoost, function(maxB) cross_validate(RCV1H3_train_container, nfold = 4, algorithm = models, maxitboost = maxB) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(h3BoostMax_CV) <- maxBoost
+
+h3BoostMax_CV
+```
+
+GLMNET H3 tune
+```{r GLMNET H3 tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1H3_train_container", "models") )
+
+maxGlm <- 10^(1:6)
+
+h3GLMMax_CV <- parLapply(clust, maxGlm, function(maxG) cross_validate(RCV1H3_train_container, nfold = 4, algorithm = models, maxitglm = maxG) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(h3GLMMax_CV) <- maxGlm
+
+h3GLMMax_CV
+```
+
+RF H3 tune
+```{r RF H3 tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1H3_train_container", "models") )
+
+RF_ntree <- seq(50, 300, 25)
+
+h3RFT_ntree_CV <- parLapply(clust, RF_ntree, function(ntree) cross_validate(RCV1H3_train_container, nfold = 4, algorithm = models, ntree = ntree) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(h3RFT_ntree_CV) <- RF_ntree
+
+h3RFT_ntree_CV
+```
+
+H4 Tuning
+```{r H4 Tuning}
+sparseThreshold <- 0.02
+
+RCV1H4_train <- nrow(RCV1H4_enlarged); NH4_enlarged_train <- 2e4; NH4_test <- 4000
+
+RCV1H4_enlarged_matrix <- create_matrix(RCV1H4_enlarged$article, language = "English",removeNumbers = TRUE, stemWords = FALSE, removeSparseTerms = (1-sparseThreshold))
+
+RCV1H4_enlarged_container <- create_container(RCV1H4_enlarged_matrix, RCV1H4_enlarged$id_cat ,trainSize = 1:NH4_enlarged_train, testSize = (NH4_enlarged_train+1):(NH4_enlarged_train+NH4_test), virgin=FALSE)
+```
+
+SVM H4 Tune
+```{r SVM H4 Tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1H4_enlarged_container", "models") )
+
+SVMcosts <- 2^(1:8)
+
+h4SVM_CV <- parLapply(clust, SVMcosts, function(cost) cross_validate(RCV1H4_enlarged_container, nfold = 4, algorithm = models, cost = cost) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(h4SVM_CV) <- SVMcosts
+
+h4SVM_CV
+```
+
+Boosting H4 tune
+```{r Boosting H4 tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1H4_enlarged_container", "models") )
+
+maxBoost <- seq(50, 300, 25)
+
+h4BoostMax_CV <- parLapply(clust, maxBoost, function(maxB) cross_validate(RCV1H4_enlarged_container, nfold = 4, algorithm = models, maxitboost = maxB) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(h4BoostMax_CV) <- maxBoost
+
+h4BoostMax_CV
+```
+
+GLMNET H4 tune
+```{r GLMNET H4 tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1H4_enlarged_container", "models") )
+
+maxGlm <- 10^(1:6)
+
+h4GLMMax_CV <- parLapply(clust, maxGlm, function(maxG) cross_validate(RCV1H4_enlarged_container, nfold = 4, algorithm = models, maxitglm = maxG) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(h4GLMMax_CV) <- maxGlm
+
+h4GLMMax_CV
+```
+
+RF H4 tune
+```{r RF H4 tune}
+timeStart <- Sys.time()
+
+numCore <- detectCores(logical = TRUE)
+
+clust <- makeCluster(numCore)
+
+models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+clusterEvalQ(clust, require(RTextTools))
+
+clusterExport(clust, varlist = c("RCV1H4_enlarged_container", "models") )
+
+RF_ntree <- seq(50, 300, 25)
+
+h4RFT_ntree_CV <- parLapply(clust, RF_ntree, function(ntree) cross_validate(RCV1H4_enlarged_container, nfold = 4, algorithm = models, ntree = ntree) )
+
+timeEnd <- Sys.time(); print(timeEnd - timeStart)
+
+stopCluster(clust)
+
+names(h4RFT_ntree_CV) <- RF_ntree
+
+h4RFT_ntree_CV
+```
+
+Final model after parameter tuning.
+```{r Best classifier}
+# All tuned parameter
+RCV1TrainTestClassify_Deep_tuned <- function(RCV1Wide_test_topDeep, RCV1Top_train_0 = RCV1Top_train, RCV1H2_train_0 = RCV1H2_train, RCV1H3_train_0 = RCV1H3_train, RCV1H4_enlarged_0 = RCV1H4_enlarged,  sparseThreshold = 0.02){
+  
+  RCV1Wide_test_topDeep$id_cat <- RCV1Wide_test_topDeep$id_cat_deep
+  
+  NTop_train <- nrow(RCV1Top_train); NTop_train_train <- 5000; NTop_test <- nrow(RCV1Wide_test_topDeep)
+
+  # NH4_enlarged <- nrow(RCV1H4_enlarged); NH4_enlarged_train <- 15000; NH4_enlarged_test <- NH4_enlarged - NH4_enlarged_train
+  
+  rbindArticle <- vctrs::vec_c(RCV1Top_train$article[1:NTop_train_train], RCV1Wide_test_topDeep$article)
+  rbindID_cat_top <- vctrs::vec_c(RCV1Top_train$id_cat[1:NTop_train_train], RCV1Wide_test_topDeep$id_cat_top)
+  
+  RCV1Top_train_matrix <- create_matrix(rbindArticle, language = "English",removeNumbers = TRUE, stemWords = FALSE, removeSparseTerms = (1-sparseThreshold))
+  RCV1Top_train_container <- create_container(RCV1Top_train_matrix, rbindID_cat_top ,trainSize = 1:NTop_train_train, testSize = (NTop_train_train+1):(NTop_train_train+NTop_test), virgin=FALSE)
+  
+  timeStart <- Sys.time()
+  
+  numCore <- detectCores(logical = TRUE)
+  
+  clust <- makeCluster(numCore)
+    
+  clusterEvalQ(clust, require(RTextTools))
+  
+  clusterExport(clust, varlist = c("RCV1Top_train_container") , envir=environment())
+  
+  models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+  topModels <- parLapply(clust, models, function(model) train_model(RCV1Top_train_container, model, cost = 2, maxitglm = 1000, ntree = 200, maxitboost = 200 ) )
+  
+  topModelsClassify <- parLapply(clust, topModels, function(model) classify_model(RCV1Top_train_container, model, cost = 10, maxitglm = 100, ntree = 200, maxitboost = 150))
+  
+  timeEnd <- Sys.time(); print(timeEnd - timeStart)
+  
+  stopCluster(clust)
+  
+  topClassify_train_test <- bind_cols(topModelsClassify)
+  
+  RCV1Top_train_analytics <- create_analytics(RCV1Top_train_container, topClassify_train_test )
+  
+  print("For Top level:")
+  print(summary(RCV1Top_train_analytics))
+  
+  agreeTop <- apply(topClassify_train_test, MARGIN = 1, FUN = halfAgree)
+  
+  agreeTop_F <- as.numeric(which(agreeTop == FALSE))
+  agreeTop_T <- as.numeric(which(agreeTop == TRUE))
+  
+  # labelTop <- apply(topClassify_train_test[agreeTop_F,], MARGIN = 1, FUN = mostLabel)
+  # Record the top level for all
+  labelEnsembleTop <- apply(topClassify_train_test, MARGIN = 1, FUN = mostLabel)
+  # print(length(labelEnsembleTop))
+  # Also create one for the deep
+  labelEnsembleDeep <- apply(topClassify_train_test, MARGIN = 1, FUN = mostLabel)
+  
+  trueTop <- RCV1Wide_test_topDeep$id_cat_top
+  
+  # topClassify_train_test_True <- cbind(trueTop, labelEnsembleTop, topClassify_train_test)
+  
+  # Do level 2 only for Gov:
+  GovCat <- which(labelEnsembleTop == 84)
+  agreeTop_TandG <- intersect(agreeTop_T, GovCat)
+  agreeTop_TandNonG <- setdiff(agreeTop_T, GovCat)
+  toLevel_2 <- RCV1Wide_test_topDeep[agreeTop_TandG,]
+  toLevel_2N <- length(agreeTop_TandG)
+  
+  NH2_train <- nrow(RCV1H2_train); NH2_train_train <- 5000; NH2_test <- toLevel_2N
+  
+  rbindArticle_h2 <- vctrs::vec_c(RCV1H2_train$article[1:NH2_train_train], toLevel_2$article)
+  rbindID_cat_h2 <- vctrs::vec_c(RCV1H2_train$id_cat[1:NH2_train_train], toLevel_2$id_cat_deep) #Set to deep temporarily, and use virgin = True next, or just ignore?
+  
+  RCV1H2_train_matrix <- create_matrix(rbindArticle_h2, language = "English",removeNumbers = TRUE, stemWords = FALSE, removeSparseTerms = (1-sparseThreshold))
+  
+  RCV1H2_train_container <- create_container(RCV1H2_train_matrix, rbindID_cat_h2 ,trainSize = 1:NH2_train_train, testSize = (NH2_train_train+1):(NH2_train_train+toLevel_2N), virgin=TRUE)
+  
+  timeStart <- Sys.time()
+  
+  numCore <- detectCores(logical = TRUE)
+  
+  clust <- makeCluster(numCore)
+    
+  clusterEvalQ(clust, require(RTextTools))
+  
+  clusterExport(clust, varlist = c("RCV1H2_train_container"), envir=environment() )
+  
+  models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+  h2Models <- parLapply(clust, models, function(model) train_model(RCV1H2_train_container, model, cost = 2, maxitboost = 150, maxitglm = 1000, ntree = 150) )
+
+  h2ModelsClassify <- parLapply(clust, h2Models, function(model) classify_model(RCV1H2_train_container, model, cost = 2, maxitboost = 1000, maxitglm = 150, ntree = 150))
+  
+  timeEnd <- Sys.time(); print(timeEnd - timeStart)
+  
+  stopCluster(clust)
+  
+  
+  h2Classify_train_test <- bind_cols(h2ModelsClassify)
+  
+  # RCV1H2_train_analytics <- create_analytics(RCV1H2_train_container, h2Classify_train_test )
+
+  # print("For h2 level:")
+  # print(summary(RCV1H2_train_analytics))
+  
+  labelEnsembleH2 <- apply(h2Classify_train_test, MARGIN = 1, FUN = mostLabel)
+  # Just check
+  # print(labelEnsembleH2)
+  
+  # Update labels
+  # labelEnsembleDeep[agreeH2_T] = labelEnsembleH2
+  labelEnsembleDeep[agreeTop_TandG] <- labelEnsembleH2
+  
+  agreeH2 <- apply(h2Classify_train_test, MARGIN = 1, FUN = halfAgree)
+  
+  agreeH2_F <- as.numeric(which(agreeH2 == FALSE))
+  agreeH2_T <- as.numeric(which(agreeH2 == TRUE))
+  
+  unionTopH2G <- union(agreeTop_TandNonG, agreeH2_T)
+  toLevel_3 <- RCV1Wide_test_topDeep[unionTopH2G,]
+  toLevel_3N <- length(unionTopH2G)
+  
+  
+  # toLevel_3 <- RCV1Wide_test_topDeep[agreeTop_T,]
+  # toLevel_3N <- length(agreeTop_T)
+  
+  NH3_train <- nrow(RCV1H3_train); NH3_train_train <- 5000; NH3_test <- toLevel_3N
+  
+  rbindArticle_h3 <- vctrs::vec_c(RCV1H3_train$article[1:NH3_train_train], toLevel_3$article)
+  rbindID_cat_h3 <- vctrs::vec_c(RCV1H3_train$id_cat[1:NH3_train_train], toLevel_3$id_cat_deep) #Set to deep temporarily, and use virgin = True next, or just ignore?
+  # rbindID_cat_h3 <- RCV1H3_train$article[1:NH3_train_train]
+  
+  RCV1H3_train_matrix <- create_matrix(rbindArticle_h3, language = "English",removeNumbers = TRUE, stemWords = FALSE, removeSparseTerms = (1-sparseThreshold))
+  
+  RCV1H3_train_container <- create_container(RCV1H3_train_matrix, rbindID_cat_h3 ,trainSize = 1:NH3_train_train, testSize = (NH3_train_train+1):(NH3_train_train+toLevel_3N), virgin=TRUE)
+  
+  
+  timeStart <- Sys.time()
+  
+  numCore <- detectCores(logical = TRUE)
+  
+  clust <- makeCluster(numCore)
+    
+  clusterEvalQ(clust, require(RTextTools))
+  
+  clusterExport(clust, varlist = c("RCV1H3_train_container"), envir=environment() )
+  
+  models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+  h3Models <- parLapply(clust, models, function(model) train_model(RCV1H3_train_container, model, cost = 4, maxitboost = 125, maxitglm = 100, ntree = 100) )
+
+  h3ModelsClassify <- parLapply(clust, h3Models, function(model) classify_model(RCV1H3_train_container, model, cost = 4, maxitboost = 125, maxitglm = 100, ntree = 150))
+  
+  timeEnd <- Sys.time(); print(timeEnd - timeStart)
+  
+  stopCluster(clust)
+  
+  
+  h3Classify_train_test <- bind_cols(h3ModelsClassify)
+  
+  # RCV1H3_train_analytics <- create_analytics(RCV1H3_train_container, h3Classify_train_test )
+
+  # print("For h3 level:")
+  # print(summary(RCV1H3_train_analytics))
+  
+  labelEnsembleH3 <- apply(h3Classify_train_test, MARGIN = 1, FUN = mostLabel)
+  
+  # Update labels
+  labelEnsembleDeep[unionTopH2G] <- labelEnsembleH3
+  
+  
+  agreeH3 <- apply(h3Classify_train_test, MARGIN = 1, FUN = halfAgree)
+  
+  agreeH3_F <- as.numeric(which(agreeH3 == FALSE))
+  agreeH3_T <- as.numeric(which(agreeH3 == TRUE))
+  
+  
+  # toLevel_4 <- RCV1Wide_test_topDeep[ agreeTop_T[agreeH3_T],]
+  toLevel_4 <- RCV1Wide_test_topDeep[ unionTopH2G[agreeH3_T],]
+  toLevel_4N <- length(agreeH3_T)
+  
+  NH4_train <- nrow(RCV1H4_enlarged); NH4_enlarged_train <- 2e4; NH4_test <- toLevel_4
+  # NH4_train <- nrow(RCV1H4_enlarged); NH4_enlarged_train <- 3000; NH4_test <- toLevel_4
+  
+  rbindArticle_h4 <- vctrs::vec_c(RCV1H4_enlarged$article[1:NH4_enlarged_train], toLevel_4$article)
+  rbindID_cat_h4 <- vctrs::vec_c(RCV1H4_enlarged$id_cat[1:NH4_enlarged_train], toLevel_4$id_cat_deep) 
+  
+  RCV1H4_enlarged_matrix <- create_matrix(rbindArticle_h4, language = "English",removeNumbers = TRUE, stemWords = FALSE, removeSparseTerms = (1-sparseThreshold))
+  
+  RCV1H4_enlarged_container <- create_container(RCV1H4_enlarged_matrix, rbindID_cat_h4 ,trainSize = 1:NH4_enlarged_train, testSize = (NH4_enlarged_train+1):(NH4_enlarged_train+toLevel_4N), virgin=TRUE)
+  
+  timeStart <- Sys.time()
+  
+  numCore <- detectCores(logical = TRUE)
+  
+  clust <- makeCluster(numCore)
+    
+  clusterEvalQ(clust, require(RTextTools))
+  
+  clusterExport(clust, varlist = c("RCV1H4_enlarged_container") , envir=environment())
+  
+  models <- c("SVM", "SLDA", "GLMNET", "BOOSTING", "RF")
+  
+  h4Models <- parLapply(clust, models, function(model) train_model(RCV1H4_enlarged_container, model, cost = 4, maxitglm = 1000, ntree = 175, maxitboost = 250 ) )
+
+  h4ModelsClassify <- parLapply(clust, h4Models, function(model) classify_model(RCV1H4_enlarged_container, model, cost = 4, maxitglm = 1000, ntree = 175, maxitboost = 250))
+  
+  timeEnd <- Sys.time(); print(timeEnd - timeStart)
+  
+  stopCluster(clust)
+  
+  h4Classify_enlarged_test <- bind_cols(h4ModelsClassify)
+  
+  # RCV1H4_enlarged_analytics <- create_analytics(RCV1H4_enlarged_container, h4Classify_enlarged_test )
+
+  # print("For h4 level:")
+  # print(summary(RCV1H4_enlarged_analytics))
+  
+  labelEnsembleH4 <- apply(h4Classify_enlarged_test, MARGIN = 1, FUN = mostLabel)
+
+  labelEnsembleDeep[unionTopH2G[agreeH3_T]] <- labelEnsembleH4
+  
+  trueDeep <- RCV1Wide_test_topDeep$id_cat_deep
+  
+  deepClassify_train_test_True <- data.frame(trueTop = as.integer(trueTop), labelEnsembleTop = as.integer(labelEnsembleTop), trueDeep = as.integer(trueDeep), labelEnsembleDeep = as.integer(labelEnsembleDeep))
+  
+  return( deepClassify_train_test_True )
+}
+
+topDeepClassify_test_tuned <- RCV1TrainTestClassify_Deep_tuned(RCV1Wide_test_topDeep)
+```
+
+Previous model metrics summary:
+```{r Previous model metrics summary}
+metricsSummary(topDeepClassify_test_tuned)
+```
+
+Final model metrics summary:
+```{r Final model metrics summary}
+metricsSummary(topDeepClassify_test_tuned)
+```
+
+Prob-weighted ensemble metrics summary:
+```{r Prob-weighted ensemble metrics summary}
+metricsSummary(topDeepClassify_test_tuned)
+```
+
+From the id_cat back to character labels
+```{r Conversion: id_cat to character labels}
+row.names(topDeepClassify_test_tuned) <- RCV1Wide_test_topDeep$id
+
+id_cat_char <- read.csv("rcv1_id_cat_table.txt", header = TRUE)
+row.names(id_cat_char) <- id_cat_char$id_cat
+
+id_cat_to_char <- function(colIDs){
+  return(id_cat_char[as.character(colIDs),]$cat)
+}
+
+topDeepClassify_char <- sapply(topDeepClassify_test_tuned, id_cat_to_char)
+
+topDeepClassify_test_tuned_char <- cbind(topDeepClassify_test_tuned, topDeepClassify_char)
+head(topDeepClassify_test_tuned_char)
+```
