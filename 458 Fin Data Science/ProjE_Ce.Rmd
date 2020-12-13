@@ -1,0 +1,653 @@
+---
+title: "15.458 Project E Ce Luo"
+output: html_notebook
+---
+
+
+```{r}
+# set the working directory for RStudio
+setwd(dirname(rstudioapi::getActiveDocumentContext()$path))
+
+require(readxl)
+```
+
+
+2. Indices and tradable proxies
+
+```{r}
+pairs_data_2 <- read_excel("ProjE_2.xlsx", sheet = 1, col_names = TRUE)
+pairs_data_2$Dates <- as.Date(pairs_data_2$Dates, format = "%Y-%m-%d" )
+# row.names(pairs_data_2) <- pairs_data_2$Dates
+head(pairs_data_2)
+```
+
+Create a scatterplot of daily returns for each pair along with a trendline and its equation.
+```{r}
+require(ggplot2)
+require(ggpmisc)
+require(ggrepel)
+
+# SP1 Index vs. SPX Index ("Generic 1-month" future vs. S&P spot)
+
+pairs_data_2$`SP1 Index r` <- c(NA, diff(log(pairs_data_2$`SP1 Index`)))
+pairs_data_2$`SPX Index r` <- c(NA, diff(log(pairs_data_2$`SPX Index`)))
+
+lmfit_2 <- lm(pairs_data_2$`SP1 Index r` ~ pairs_data_2$`SPX Index r`)
+
+lmpred_2 <- predict(lmfit_2, se.fit = TRUE)
+
+# t_level_2 <- c(-3,3)
+# t_level_2 <- c(-5,5)
+# t_level_2 <- c(-20,20)
+t_level_2 <- c(-40,40)
+
+ConfidenceInt_2 <- lmpred_2$fit + outer(lmpred_2$se.fit, t_level_2) 
+colnames(ConfidenceInt_2) <- c("lwr", "upr")
+ConfidenceInt_2 <- rbind(c(NA,NA), ConfidenceInt_2)
+
+
+outlierDates_2 <- ifelse(pairs_data_2$`SP1 Index r` < ConfidenceInt_2[,"upr"] & pairs_data_2$`SP1 Index r` > ConfidenceInt_2[,"lwr"], "", as.character(pairs_data_2$Dates))
+
+pairPlot_2 <- ggplot(data = pairs_data_2, aes(x = `SPX Index r`, y = `SP1 Index r`)) + geom_point() + labs(title="S&P 500: SP1 Index vs. SPX Index") + geom_smooth(method = "lm", formula = y ~ x, se = TRUE) + stat_poly_eq(formula = y ~ x, aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), parse = TRUE) 
+
+pairPlot_2
+# pairPlot_2 + geom_text(aes(label=outlierDates_2))
+pairPlot_2 + geom_text_repel(aes(label=outlierDates_2))
+
+```
+
+```{r}
+rbind(
+  pairs_data_2[which(pairs_data_2$Dates == as.Date("2018-02-06", "%Y-%m-%d"))-2,],
+  pairs_data_2[which(pairs_data_2$Dates == as.Date("2018-02-06", "%Y-%m-%d"))-1,],
+  pairs_data_2[which(pairs_data_2$Dates == as.Date("2018-02-06", "%Y-%m-%d")),],
+  pairs_data_2[which(pairs_data_2$Dates == as.Date("2018-02-06", "%Y-%m-%d"))+1,],
+  pairs_data_2[which(pairs_data_2$Dates == as.Date("2018-02-06", "%Y-%m-%d"))+2,]
+)
+
+```
+
+
+```{r}
+# SPY Equity vs. SPX Index (Index ETF vs. S&P spot)
+
+pairs_data_2$`SPY US Equity r` <- c(NA, diff(log(pairs_data_2$`SPY US Equity`)))
+
+lmfit_2 <- lm(pairs_data_2$`SPY US Equity r` ~ pairs_data_2$`SPX Index r`)
+
+lmpred_2 <- predict(lmfit_2, se.fit = TRUE)
+
+# t_level_2 <- c(-2,2)
+# t_level_2 <- c(-5,5)
+# t_level_2 <- c(-20,20)
+t_level_2 <- c(-40,40)
+
+ConfidenceInt_2 <- lmpred_2$fit + outer(lmpred_2$se.fit, t_level_2) 
+colnames(ConfidenceInt_2) <- c("lwr", "upr")
+ConfidenceInt_2 <- rbind(c(NA,NA), ConfidenceInt_2)
+
+
+outlierDates_2 <- ifelse(pairs_data_2$`SPY US Equity r` < ConfidenceInt_2[,"upr"] & pairs_data_2$`SPY US Equity r` > ConfidenceInt_2[,"lwr"], "", as.character(pairs_data_2$Dates))
+
+pairPlot_2 <- ggplot(data = pairs_data_2, aes(x = `SPX Index r`, y = `SPY US Equity r`)) + geom_point() + labs(title="S&P 500: SPY Equity vs. SPX Index") + geom_smooth(method = "lm", formula = y ~ x, se = TRUE) + stat_poly_eq(formula = y ~ x, aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), parse = TRUE) 
+
+pairPlot_2
+# pairPlot_2 + geom_text(aes(label=outlierDates_2))
+pairPlot_2 + geom_text_repel(aes(label=outlierDates_2))
+
+```
+
+```{r}
+# GLD Equity vs. GOLDS Cmdty (Gold ETF vs. spot metal)
+pairs_data_2$`GLD US Equity r` <- c(NA, diff(log(pairs_data_2$`GLD US Equity`)))
+pairs_data_2$`GOLDS Comdty r` <- c(NA, diff(log(pairs_data_2$`GOLDS Comdty`)))
+
+lmfit_2 <- lm(pairs_data_2$`GLD US Equity r` ~ pairs_data_2$`GOLDS Comdty r`)
+
+lmpred_2 <- predict(lmfit_2, se.fit = TRUE)
+
+# t_level_2 <- c(-2,2)
+# t_level_2 <- c(-5,5)
+# t_level_2 <- c(-20,20)
+# t_level_2 <- c(-40,40)
+t_level_2 <- c(-60,60)
+
+ConfidenceInt_2 <- lmpred_2$fit + outer(lmpred_2$se.fit, t_level_2) 
+colnames(ConfidenceInt_2) <- c("lwr", "upr")
+ConfidenceInt_2 <- rbind(c(NA,NA), ConfidenceInt_2)
+
+
+outlierDates_2 <- ifelse(pairs_data_2$`GLD US Equity r` < ConfidenceInt_2[,"upr"] & pairs_data_2$`GLD US Equity r` > ConfidenceInt_2[,"lwr"], "", as.character(pairs_data_2$Dates))
+
+pairPlot_2 <- ggplot(data = pairs_data_2, aes(x = `GOLDS Comdty r`, y = `GLD US Equity r`)) + geom_point() + labs(title="Gold: GLD Equity vs. GOLDS Comdty (Gold ETF vs. spot metal)") + geom_smooth(method = "lm", formula = y ~ x, se = TRUE) + stat_poly_eq(formula = y ~ x, aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), parse = TRUE)
+
+pairPlot_2
+# pairPlot_2 + geom_text(aes(label=outlierDates_2))
+pairPlot_2 + geom_text_repel(aes(label=outlierDates_2))
+
+```
+
+
+```{r}
+# WTI 1-month future vs. spot oil
+
+# # CL1 Comdty similar
+pairs_data_2$`BCOMCL1 Index r` <- c(NA, diff(log(pairs_data_2$`BCOMCL1 Index`)))
+pairs_data_2$`USCRWTIC Index r` <- c(NA, diff(log(pairs_data_2$`USCRWTIC Index`)))
+
+lmfit_2 <- lm(pairs_data_2$`BCOMCL1 Index r` ~ pairs_data_2$`USCRWTIC Index r`)
+
+lmpred_2 <- predict(lmfit_2, se.fit = TRUE)
+
+# t_level_2 <- c(-2,2)
+# t_level_2 <- c(-5,5)
+# t_level_2 <- c(-20,20)
+# t_level_2 <- c(-40,40)
+t_level_2 <- c(-60,60)
+
+ConfidenceInt_2 <- lmpred_2$fit + outer(lmpred_2$se.fit, t_level_2) 
+colnames(ConfidenceInt_2) <- c("lwr", "upr")
+ConfidenceInt_2 <- rbind(c(NA,NA), ConfidenceInt_2)
+
+
+outlierDates_2 <- ifelse(pairs_data_2$`BCOMCL1 Index r` < ConfidenceInt_2[,"upr"] & pairs_data_2$`BCOMCL1 Index r` > ConfidenceInt_2[,"lwr"], "", as.character(pairs_data_2$Dates))
+
+pairPlot_2 <- ggplot(data = pairs_data_2, aes(x = `USCRWTIC Index r`, y = `BCOMCL1 Index r`)) + geom_point() + labs(title="Oil: WTI 1-month future vs. spot oil") + geom_smooth(method = "lm", formula = y ~ x, se = TRUE) + stat_poly_eq(formula = y ~ x, aes(label = paste(..eq.label.., ..rr.label.., sep = "~~~")), parse = TRUE)
+
+pairPlot_2
+# pairPlot_2 + geom_text(aes(label=outlierDates_2))
+pairPlot_2 + geom_text_repel(aes(label=outlierDates_2))
+```
+
+
+3. Options and hedging:
+```{r}
+require(zoo)
+require(data.table)
+
+
+options_data_3_90 <- read.csv("ProjE_3_90.txt")
+options_data_3_95 <- read.csv("ProjE_3_95.txt")
+options_data_3_100 <- read.csv("ProjE_3_100.txt")
+
+options_data_3_90$d <- as.Date(options_data_3_90$d , format = "%Y-%m-%d")
+options_data_3_90$divExDate <- as.Date(options_data_3_90$divExDate , format = "%Y-%m-%d")
+
+options_data_3_95$d <- as.Date(options_data_3_95$d , format = "%Y-%m-%d")
+options_data_3_95$divExDate <- as.Date(options_data_3_95$divExDate , format = "%Y-%m-%d")
+
+options_data_3_100$d <- as.Date(options_data_3_100$d , format = "%Y-%m-%d")
+options_data_3_100$divExDate <- as.Date(options_data_3_100$divExDate , format = "%Y-%m-%d")
+
+head(options_data_3_100)
+tail(options_data_3_100)
+```
+
+```{r}
+optionHedging3 <- function(options_data_3){
+  
+  print(paste("For strike", options_data_3$id_strike[1]))
+  
+  # Initialize
+  days_3 <- nrow(options_data_3)
+  
+  rfBond_val_3 <- rep(0, days_3)
+  shares_3 <- rep(0, days_3)
+  options_3 <- rep(0, days_3)
+  mktVal_3 <- rep(0, days_3)
+  profit_3 <- rep(0, days_3)
+  
+  numContract <- 35
+  
+  options_3[1] <- -numContract*100
+  shares_3[1] <- -options_3[1]*options_data_3$delta[1]
+  rfBond_val_3[1] <- -options_3[1]*options_data_3$ask[1] - shares_3[1]*options_data_3$spot[1]
+  mktVal_3[1] <- options_3[1]*(options_data_3$p[1] - options_data_3$ask[1])
+  profit_3[1] <- mktVal_3[1]
+  delta_t_3 <- 1/252
+  
+  # Simulation
+  for(i in 2:(days_3)){
+    options_3[i] <- options_3[i-1]
+    
+    # use the latest available gamma for delta approxiamtion if NA
+    if (!is.na(options_data_3$delta[i])){
+      shares_3[i] <- -options_3[i]*options_data_3$delta[i]
+    }
+    else{
+      k <- 1
+      while (is.na(options_data_3$gamma[i-k])) {
+        k <- k + 1
+      }
+      gamma_previous <- options_data_3$gamma[i-k]
+      deltaApprox <- options_data_3$delta[i-k] + options_data_3$gamma[i-k]*(options_data_3$spot[i] - options_data_3$spot[i-k])
+      shares_3[i] <- -options_3[i]*deltaApprox
+    }
+    
+    # Check whether there is a dividend and also the stock holding on the ex-date
+    if (is.na(options_data_3$divAmount[i]) | options_data_3$divExDate[i] < options_data_3$d[1]){
+      rfBond_val_3[i] <- exp(options_data_3$rf[i]/365)*rfBond_val_3[i-1] - (shares_3[i] - shares_3[i-1])*options_data_3$spot[i]
+    }
+    else { # receive dividend for positive position and pay for negative, based on the ex-date
+      dNum <- which(options_data_3$d == options_data_3$divExDate[i])
+      rfBond_val_3[i] <- exp(options_data_3$rf[i]/365)*rfBond_val_3[i-1] - (shares_3[i] - shares_3[i-1])*options_data_3$spot[i] + shares_3[dNum] * options_data_3$divAmount[i]
+    }
+    
+    mktVal_3[i] <- options_3[i]*options_data_3$p[i] + shares_3[i]*options_data_3$spot[i] + rfBond_val_3[i]
+    profit_3[i] <- mktVal_3[i] - mktVal_3[i-1]
+  }
+  
+  # Final Results
+  results_3 <- cbind.data.frame(options_data_3$d, options_3, shares_3, rfBond_val_3, mktVal_3, profit_3)
+  colnames(results_3) <- c('Date', 'Options','Shares', 'Cash', 'MV', 'Profit')
+  
+  # Plot market value vs. time over the lifetime of the trade.
+  MV_plot <- ggplot(data = results_3, aes(x = Date, y = MV)) + geom_point() + geom_line() + labs(title="Mark-to-market Value of the Delta-hedged Portfolio")
+  
+  plot(MV_plot)
+  
+  
+  expected_PNL_3 <- exp(options_data_3$rf[1]*as.numeric(results_3$Date[nrow(results_3)] - results_3$Date[1])/365)*mktVal_3[1] 
+  # If perfect hedging onwards, and earn the first rf rate.
+  
+  finalMV_3 <- results_3$MV[days_3]
+  
+  PNL_sd_3 <- sqrt(252)*sd(profit_3)
+  
+  # initial cash 0, define Sharpe differently
+  PNL_Sharpe_3 <- (252*mean(profit_3) - expected_PNL_3)/PNL_sd_3
+  
+  print(sprintf("Expected P/L: %g", expected_PNL_3))
+  print(sprintf("Final realized P/L: %g", finalMV_3))
+  print(sprintf("Annualized standard deviation of P/L: %g", PNL_sd_3))
+  print(sprintf("Annualized Sharpe ratio for the trade: %g", PNL_Sharpe_3))
+  
+  
+  # Plot option delta over time for the lifetime of the trade.
+  delta_plot <- ggplot(data = options_data_3, aes(x = d, y = delta)) + geom_point() + geom_line() + labs(title="Option Delta over Time")
+  
+  plot(delta_plot)
+  
+  
+  
+  options_data_3$spotRet <- options_data_3$spot/shift(options_data_3$spot) - 1
+  # Realized 1-month (about 21 trading days) vol
+  options_data_3$realizedVol21 <- sqrt(252)*rollapply(options_data_3$spotRet, width = 21, align = "left", FUN = sd, fill = NA)
+  
+  IV_3 <- data.frame(options_data_3$d, options_data_3$iv, rep("Implied Vol", length(options_data_3$iv)))
+  colnames(IV_3) <- c("Date", "Vol", "Type")
+  RealV_3 <- data.frame(options_data_3$d, options_data_3$realizedVol21, rep("Realized Vol", length(options_data_3$realizedVol21)))
+  colnames(RealV_3) <- c("Date", "Vol", "Type")
+  
+  vol_data_3 <- rbind(IV_3, RealV_3) 
+  
+  vol_plot <- ggplot(data = vol_data_3, aes( x = Date, y = Vol, color = Type)) + geom_line() + labs(title="Implied Volatility vs. Realized 1-month Volatility")
+  plot(vol_plot)
+  
+  
+  # Create a scatterplot of daily P/L vs. return on the DIA.
+  PNL_and_DIARet <- data.frame(results_3$Date, results_3$Profit, options_data_3$spotRet)
+  colnames(PNL_and_DIARet) <- c("Date", "PNL", "DIA_Return")
+  
+  plotCoeff_3i <- 5e-5
+  
+  returns_plot <- ggplot(data = PNL_and_DIARet, aes(Date)) + geom_line(aes(y = PNL, colour = "PNL")) +geom_line(aes(y = DIA_Return/plotCoeff_3i, colour = "DIA_Return")) +
+  scale_y_continuous(name = "For PNL", sec.axis = sec_axis(~.*plotCoeff_3i, name="For DIA Return"))+ labs(title="Daily P/L vs. Return on the DIA",x="Date")
+  
+  plot(returns_plot)
+  
+  print( sprintf("Correlation between PNL and DIA Return: %g", cor(PNL_and_DIARet$PNL[-1], PNL_and_DIARet$DIA_Return[-1])) )
+  
+  # For plot series in a single plot
+  return_Sum_Data <- data.frame(cbind(results_3$Date, results_3$MV, options_data_3$delta, vol_data_3, as.character(options_data_3$id_strike)))
+  return(return_Sum_Data)
+}
+
+```
+
+```{r}
+# For strike 90
+sum_data_90_3 <- optionHedging3(options_data_3_90)
+```
+
+```{r}
+sum_data_95_3 <- optionHedging3(options_data_3_95)
+```
+
+```{r}
+sum_data_100_3 <- optionHedging3(options_data_3_100)
+```
+
+```{r}
+sum_data_all_3 <- rbind(sum_data_90_3, sum_data_95_3, sum_data_100_3)
+colnames(sum_data_all_3) <- c("Date", "MV", "Delta", "Date_", "Vol", "Vol Type", "Strike")
+sum_data_all_3$VolType_Strike <- paste(sum_data_all_3$`Vol Type`, sum_data_all_3$Strike)
+tail(sum_data_all_3)
+```
+
+```{r}
+ggplot(data = sum_data_all_3, aes(x = Date, y = MV, color = Strike)) + geom_point() + geom_line() + labs(title="Mark-to-market Value of the Delta-hedged Portfolio") 
+```
+
+
+```{r}
+ggplot(data = sum_data_all_3, aes(x = Date, y = Delta, color = Strike )) + geom_point() + geom_line() + labs(title="Option Delta over Time")
+```
+
+```{r}
+ggplot(data = sum_data_all_3, aes( x = Date, y = Vol, color = VolType_Strike)) + geom_line() + labs(title="Implied Volatility vs. Realized 1-month Volatility")
+```
+
+For optional, extra credit:
+```{r}
+finalMV_sd_3 <- function(sum_data_3){
+  colnames(sum_data_3) <- c("Date", "MV", "Delta", "Date_", "Vol", "Vol Type", "Strike")
+  sum_data_3 <- cbind(sum_data_3, c(0, diff(sum_data_3$MV)))
+  colnames(sum_data_3) <- c("Date", "MV", "Delta", "Date_", "Vol", "Vol Type", "Strike", "MV_diff")
+  
+  # sum_data_90_3 <- sum_data_90_3[-which(sum_data_90_3$Date == as.Date("2009-05-29", "%Y-%m-%d")),]
+  sum_data_3 <- sum_data_3[which(sum_data_3$MV_diff > -10000),]
+  
+  plot(qplot(sum_data_3$MV_diff) + labs(title = sprintf("Daily P/L For Strike %s", sum_data_3$Strike[1])))
+  
+  MC_N_3 <- 5000
+  
+  MC_final <- rep(0, MC_N_3)
+  
+  for (i in 1:MC_N_3){
+    MC_final[i] <- sum_data_3$MV[1]
+    for (t in 2:length(sum_data_3$Date)){
+      MC_final[i] <- MC_final[i] + sample(sum_data_3$MV_diff, 1,  replace = TRUE)
+    }
+  }
+  
+  return(sd(MC_final))
+}
+
+
+```
+
+```{r}
+finalMV_sd_3(sum_data_90_3)
+```
+
+```{r}
+finalMV_sd_3(sum_data_95_3)
+```
+
+```{r}
+finalMV_sd_3(sum_data_100_3)
+```
+
+
+
+
+4. Butterfly
+```{r}
+options_data_90_4 <- read.csv("ProjE_3_90.txt")
+options_data_95_4 <- read.csv("ProjE_3_95.txt")
+options_data_100_4 <- read.csv("ProjE_3_100.txt")
+
+options_data_90_4$d <- as.Date(options_data_90_4$d , format = "%Y-%m-%d")
+options_data_90_4$divExDate <- as.Date(options_data_90_4$divExDate , format = "%Y-%m-%d")
+
+options_data_95_4$d <- as.Date(options_data_95_4$d , format = "%Y-%m-%d")
+options_data_95_4$divExDate <- as.Date(options_data_95_4$divExDate , format = "%Y-%m-%d")
+
+options_data_100_4$d <- as.Date(options_data_100_4$d , format = "%Y-%m-%d")
+options_data_100_4$divExDate <- as.Date(options_data_100_4$divExDate , format = "%Y-%m-%d")
+
+```
+
+
+```{r}
+# Initialize
+days_4 <- nrow(options_data_90_4)
+
+options_90_4 <- rep(0, days_4)
+options_95_4 <- rep(0, days_4)
+options_100_4 <- rep(0, days_4)
+
+rfBond_val_4 <- rep(0, days_4)
+shares_4 <- rep(0, days_4)
+aggreVega_4 <- rep(0, days_4)
+
+mktVal_4 <- rep(0, days_4)
+profit_4 <- rep(0, days_4)
+
+numContract_4 <- 35
+
+options_90_4[1] <- -numContract_4*100
+options_95_4[1] <- 2*numContract_4*100
+options_100_4[1] <- -numContract_4*100
+
+shares_4[1] <- - options_90_4[1]*options_data_90_4$delta[1] - options_95_4[1]*options_data_95_4$delta[1] - options_100_4[1]*options_data_100_4$delta[1]
+
+aggreVega_4[1] <- - options_90_4[1]*options_data_90_4$vega[1] - options_95_4[1]*options_data_95_4$vega[1] - options_100_4[1]*options_data_100_4$vega[1]
+
+# Buy the "wings" at the bid price and sell the 95's at the ask price.
+rfBond_val_4[1] <- -options_90_4[1]*options_data_90_4$ask[1] - options_95_4[1]*options_data_95_4$bid [1] - options_100_4[1]*options_data_100_4$ask[1] - shares_4[1]*options_data_90_4$spot[1]
+
+mktVal_4[1] <- options_90_4[1]*(options_data_90_4$p[1] - options_data_90_4$ask[1]) + options_95_4[1]*(options_data_95_4$p[1] - options_data_95_4$bid[1]) + options_100_4[1]*(options_data_100_4$p[1] - options_data_100_4$ask[1])
+
+profit_4[1] <- mktVal_4[1]
+delta_t_4 <- 1/252
+
+# Simulation
+for(i in 2:(days_4)){
+  options_90_4[i] <- options_90_4[i-1]
+  options_95_4[i] <- options_95_4[i-1]
+  options_100_4[i] <- options_100_4[i-1]
+  
+  # use the latest available gamma for delta approxiamtion if NA
+  deltaApprox_90_4 <- 0
+  deltaApprox_95_4 <- 0
+  deltaApprox_100_4 <- 0
+  
+  if (!is.na(options_data_90_4$delta[i])){
+    # shares_3[i] <- -options_3[i]*options_data_3$delta[i]
+    deltaApprox_90_4 <- options_data_90_4$delta[i]
+  }
+  else{
+    k <- 1
+    while (is.na(options_data_90_4$gamma[i-k])) {
+      k <- k + 1
+    }
+    gamma_previous <- options_data_90_4$gamma[i-k]
+    deltaApprox_90_4 <- options_data_90_4$delta[i-k] + options_data_90_4$gamma[i-k]*(options_data_90_4$spot[i] - options_data_90_4$spot[i-k])
+    # shares_3[i] <- -options_3[i]*deltaApprox
+  }
+  
+  if (!is.na(options_data_95_4$delta[i])){
+    deltaApprox_95_4 <- options_data_95_4$delta[i]
+  }
+  else{
+    k <- 1
+    while (is.na(options_data_95_4$gamma[i-k])) {
+      k <- k + 1
+    }
+    gamma_previous <- options_data_95_4$gamma[i-k]
+    deltaApprox_95_4 <- options_data_95_4$delta[i-k] + options_data_95_4$gamma[i-k]*(options_data_95_4$spot[i] - options_data_95_4$spot[i-k])
+  }
+  
+  if (!is.na(options_data_100_4$delta[i])){
+    deltaApprox_100_4 <- options_data_100_4$delta[i]
+  }
+  else{
+    k <- 1
+    while (is.na(options_data_100_4$gamma[i-k])) {
+      k <- k + 1
+    }
+    gamma_previous <- options_data_100_4$gamma[i-k]
+    deltaApprox_100_4 <- options_data_100_4$delta[i-k] + options_data_100_4$gamma[i-k]*(options_data_100_4$spot[i] - options_data_100_4$spot[i-k])
+  }
+  
+  aggregateDelta_4 <- - options_90_4[i]*deltaApprox_90_4 - options_95_4[i]*deltaApprox_95_4 - options_100_4[i]*deltaApprox_100_4
+  
+  shares_4[i] <- aggregateDelta_4
+  
+  
+  # Calculate aggregate vega, use the latest available vega if NA
+  vegaApprox_90_4 <- 0
+  vegaApprox_95_4 <- 0
+  vegaApprox_100_4 <- 0
+  if (!is.na(options_data_90_4$vega[i])){
+    vegaApprox_90_4 <- options_data_90_4$vega[i]
+  }
+  else{
+    k <- 1
+    while (is.na(options_data_90_4$vega[i-k])) {
+      k <- k + 1
+    }
+    vegaApprox_90_4 <- options_data_90_4$vega[i-k]
+  }
+  
+  if (!is.na(options_data_95_4$vega[i])){
+    vegaApprox_95_4 <- options_data_95_4$vega[i]
+  }
+  else{
+    k <- 1
+    while (is.na(options_data_95_4$vega[i-k])) {
+      k <- k + 1
+    }
+    vegaApprox_95_4 <- options_data_95_4$vega[i-k]
+  }
+  
+  if (!is.na(options_data_100_4$vega[i])){
+    vegaApprox_100_4 <- options_data_100_4$vega[i]
+  }
+  else{
+    k <- 1
+    while (is.na(options_data_100_4$vega[i-k])) {
+      k <- k + 1
+    }
+    vegaApprox_100_4 <- options_data_100_4$vega[i-k]
+  }
+  
+  aggreVega_4[i] <- - options_90_4[i]*vegaApprox_90_4 - options_95_4[i]*vegaApprox_95_4 - options_100_4[i]*vegaApprox_100_4
+  
+  
+  # Check whether there is a dividend and also the stock holding on the ex-date
+  if (is.na(options_data_90_4$divAmount[i]) | options_data_90_4$divExDate[i] < options_data_90_4$d[1]){
+    rfBond_val_4[i] <- exp(options_data_90_4$rf[i]/365)*rfBond_val_4[i-1] - (shares_4[i] - shares_4[i-1])*options_data_90_4$spot[i]
+  }
+  else { # receive dividend for positive position and pay for negative, based on the ex-date
+    dNum <- which(options_data_90_4$d == options_data_90_4$divExDate[i])
+    rfBond_val_4[i] <- exp(options_data_90_4$rf[i]/365)*rfBond_val_4[i-1] - (shares_4[i] - shares_4[i-1])*options_data_90_4$spot[i] + shares_4[dNum] * options_data_90_4$divAmount[i]
+  }
+  
+  mktVal_4[i] <- shares_4[i]*options_data_3$spot[i] + rfBond_val_4[i] + options_90_4[i]*options_data_90_4$p[i] + options_95_4[i]*options_data_95_4$p[i] + options_100_4[i]*options_data_100_4$p[i]
+  
+  profit_4[i] <- mktVal_4[i] - mktVal_4[i-1]
+}
+
+# Final Results
+results_4 <- cbind.data.frame(options_data_90_4$d, options_90_4, options_95_4, options_100_4, shares_4, aggreVega_4, rfBond_val_4, mktVal_4, profit_4)
+colnames(results_4) <- c('Date', 'Options 90', 'Options 95', 'Options 100', 'Shares', 'Aggregate Vega', 'Cash', 'MV', 'Profit')
+
+# Plot market value vs. time over the lifetime of the trade.
+MV_plot <- ggplot(data = results_4, aes(x = Date, y = MV)) + geom_point() + geom_line() + labs(title="Mark-to-market Value of the Delta-hedged Butterfly Portfolio")
+
+plot(MV_plot)
+
+
+expected_PNL_4 <- exp(options_data_90_4$rf[1]*as.numeric(results_4$Date[nrow(results_3)] - results_4$Date[1])/365)*mktVal_4[1] 
+# If perfect hedging onwards, and earn the first rf rate.
+
+finalMV_4 <- results_4$MV[days_4]
+
+PNL_sd_4 <- sqrt(252)*sd(profit_4)
+
+# initial cash 0, define Sharpe differently
+PNL_Sharpe_4 <- (252*mean(profit_4) - expected_PNL_4)/PNL_sd_4
+
+print(sprintf("Expected P/L: %g", expected_PNL_4))
+print(sprintf("Final realized P/L: %g", finalMV_4))
+print(sprintf("Annualized standard deviation of P/L: %g", PNL_sd_4))
+print(sprintf("Annualized Sharpe ratio for the trade: %g", PNL_Sharpe_4))
+
+
+# Plot the aggregate option delta over time for the lifetime of the trade.
+aggregDelta_plot <- ggplot(data = results_4, aes(x = Date, y = Shares)) + geom_point() + geom_line() + labs(title="Butterfly Aggregate Delta over Time", x = "Date", y = "Aggregate Delta (Shares)")
+
+plot(aggregDelta_plot)
+
+
+aggregVega_plot <- ggplot(data = results_4, aes(x = Date, y = `Aggregate Vega`)) + geom_point() + geom_line() + labs(title="Butterfly Aggregate Vega over Time", x = "Date", y = "Aggregate Vega")
+
+plot(aggregVega_plot)
+
+
+# Create a scatterplot of daily P/L vs. return on the DIA.
+spotRet_4 <- options_data_90_4$spot/shift(options_data_90_4$spot) - 1
+PNL_and_DIARet <- data.frame(results_4$Date, results_4$Profit, spotRet_4)
+colnames(PNL_and_DIARet) <- c("Date", "PNL", "DIA_Return")
+
+plotCoeff_4 <- 5e-5
+
+returns_plot <- ggplot(data = PNL_and_DIARet, aes(Date)) + geom_line(aes(y = PNL, colour = "PNL")) +geom_line(aes(y = DIA_Return/plotCoeff_4, colour = "DIA_Return")) +
+scale_y_continuous(name = "For PNL", sec.axis = sec_axis(~.*plotCoeff_4, name="For DIA Return"))+ labs(title="Daily P/L vs. Return on the DIA",x="Date")
+
+plot(returns_plot)
+
+print( sprintf("Correlation between PNL and DIA Return: %g", cor(PNL_and_DIARet$PNL[-1], PNL_and_DIARet$DIA_Return[-1])) )
+```
+
+
+```{r}
+# results_4[100:105,]
+# 2009-05-29 a little weird, check
+
+rbind(options_data_90_4[which(options_data_90_4$d == as.Date("2009-05-29", "%Y-%m-%d")) - 1 ,],
+      options_data_95_4[which(options_data_95_4$d == as.Date("2009-05-29", "%Y-%m-%d")) - 1 ,],
+      options_data_100_4[which(options_data_100_4$d == as.Date("2009-05-29", "%Y-%m-%d")) - 1 ,]
+      )
+
+rbind(options_data_90_4[which(options_data_90_4$d == as.Date("2009-05-29", "%Y-%m-%d")) ,],
+      options_data_95_4[which(options_data_95_4$d == as.Date("2009-05-29", "%Y-%m-%d")) ,],
+      options_data_100_4[which(options_data_100_4$d == as.Date("2009-05-29", "%Y-%m-%d")) ,]
+      )
+
+rbind(options_data_90_4[which(options_data_90_4$d == as.Date("2009-05-29", "%Y-%m-%d")) + 1 ,],
+      options_data_95_4[which(options_data_95_4$d == as.Date("2009-05-29", "%Y-%m-%d")) + 1 ,],
+      options_data_100_4[which(options_data_100_4$d == as.Date("2009-05-29", "%Y-%m-%d")) + 1 ,]
+      )
+
+      
+```
+
+```{r}
+qplot(options_data_100_4$d, options_data_100_4$spot) + labs(x = "Date", y = "DIA Spot")
+```
+
+For optional
+```{r}
+
+results_4_c <- cbind(results_4, c(0, diff(results_4$MV)))
+colnames(results_4_c)[length(results_4_c)] <- "MV_diff"
+
+
+plot(qplot(results_4_c$MV_diff) + labs(title = "Daily P/L for Butterfly"))
+
+MC_N_4 <- 10000
+
+MC_final_4 <- rep(0, MC_N_4)
+
+for (i in 1:MC_N_4){
+  MC_final_4[i] <- results_4_c$MV[1]
+  for (t in 2:length(results_4_c$Date)){
+    MC_final_4[i] <- MC_final_4[i] + sample(results_4_c$MV_diff, 1,  replace = TRUE)
+  }
+}
+  
+sd(MC_final_4)
+```
+
+
+
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Ctrl+Alt+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Ctrl+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
